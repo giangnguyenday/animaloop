@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Build, animate, and capture Opla festival key visuals.">
+  <title>ANIMALOOP — Opla Studio</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Animaloop Studio">
+      <img src="./src/logo.svg" alt="" width="104" height="54">
+    </a>
+    <h1 id="studio-title" class="header-caption mono">Cook your Opla</h1>
+    <div class="header-actions">
+      <details class="action-menu">
+        <summary class="button">Project <span aria-hidden="true">⌄</span></summary>
+        <div class="menu-content">
+          <button type="button" id="project-open">Open project</button>
+          <button type="button" id="project-save">Save project</button>
+          <button type="button" id="reset-mode">Reset current tab</button>
+          <button type="button" id="clear-scene">Remove all characters</button>
+        </div>
+      </details>
+      <details class="action-menu">
+        <summary class="button primary">Export <span aria-hidden="true">↗</span></summary>
+        <div class="menu-content">
+          <button type="button" id="export-svg">Download SVG</button>
+          <button type="button" id="export-png">Download PNG</button>
+        </div>
+      </details>
+    </div>
+  </header>
+  <main class="workspace">
+    <section class="art-area" aria-label="Artboard">
+      <div class="stage-card">
+        <div class="stage-toolbar">
+          <div class="artboard-name mono"><span class="frame-icon" aria-hidden="true"></span> ARTBOARD <span class="artboard-number">01</span></div>
+          <div class="zoom-group">
+            <button type="button" id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+            <button type="button" id="zoom-reset" title="Reset zoom" aria-label="Reset zoom"><span id="zoom-value">100%</span></button>
+            <button type="button" id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+          </div>
+        </div>
+        <div id="viewport">
+          <div class="stage-space">
+            <div id="stage-wrap">
+              <svg id="stage" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" role="img" aria-label="Opla key visual"></svg>
+            </div>
+          </div>
+        </div>
+        <div class="stage-footer">
+          <div class="stage-meta mono"><span class="signal"></span><span id="canvas-dimensions">1080 × 1080</span><span class="units">PX</span></div>
+          <button type="button" class="button capture-button" id="capture"><span class="capture-icon" aria-hidden="true"></span> Capture frame</button>
+        </div>
+      </div>
+      <div class="workspace-footer mono">
+        <span>by Behalf</span>
+        <div class="workspace-feedback">
+          <span id="status" role="status" aria-live="polite"></span>
+          <button type="button" id="undo-scene" hidden>Undo</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="inspector" aria-label="Editor controls">
+      <div class="inspector-heading"><span class="eyebrow mono">STUDIO CONTROLS</span><span class="inspector-index mono">✳</span></div>
+      <div id="tabs" class="tabs" role="tablist" aria-label="Editing mode">
+        <button type="button" id="tab-place" role="tab" aria-label="Place" title="Place" aria-selected="true" aria-controls="panel-place" data-tab="place">
+          <svg width="21" height="21" aria-hidden="true" focusable="false"><use href="./src/phosphor/tabs.svg#place"/></svg>
+        </button>
+        <button type="button" id="tab-walk" role="tab" aria-label="Walk" title="Walk" aria-selected="false" aria-controls="panel-walk" tabindex="-1" data-tab="walk">
+          <svg width="21" height="21" aria-hidden="true" focusable="false"><use href="./src/phosphor/tabs.svg#walk"/></svg>
+        </button>
+        <button type="button" id="tab-effect" role="tab" aria-label="Effect" title="Effect" aria-selected="false" aria-controls="panel-effect" tabindex="-1" data-tab="effect">
+          <svg width="21" height="21" aria-hidden="true" focusable="false"><use href="./src/phosphor/tabs.svg#effect"/></svg>
+        </button>
+        <button type="button" id="tab-physics" role="tab" aria-label="Physics" title="Physics" aria-selected="false" aria-controls="panel-physics" tabindex="-1" data-tab="physics">
+          <svg width="21" height="21" aria-hidden="true" focusable="false"><use href="./src/phosphor/tabs.svg#physics"/></svg>
+        </button>
+        <button type="button" id="tab-camera" role="tab" aria-label="Camera" title="Camera" aria-selected="false" aria-controls="panel-camera" tabindex="-1" data-tab="camera">
+          <svg width="21" height="21" aria-hidden="true" focusable="false"><use href="./src/phosphor/tabs.svg#camera"/></svg>
+        </button>
+        <button type="button" id="tab-settings" role="tab" aria-label="Settings" title="Settings" aria-selected="false" aria-controls="panel-settings" tabindex="-1" data-tab="settings">
+          <svg width="21" height="21" aria-hidden="true" focusable="false"><use href="./src/phosphor/tabs.svg#settings"/></svg>
+        </button>
+      </div>
+
+      <section id="panel-place" role="tabpanel" aria-labelledby="tab-place">
+        <div class="control-section">
+          <div class="section-title"><h2>Characters</h2><span class="section-index mono">01</span></div>
+          <div class="item-list" id="character-list"></div>
+          <div class="row-actions">
+            <button type="button" class="button" id="add-character"><span aria-hidden="true">+</span> Add Opla</button>
+            <button type="button" class="button" id="remove-character">Remove</button>
+          </div>
+        </div>
+        <div class="control-section">
+          <div class="section-title"><h2>Appearance</h2><span class="section-index mono">02</span></div>
+          <div class="field">
+            <span class="field-label" id="character-color-label">Character color</span>
+            <div class="palette" id="character-palette" role="group" aria-labelledby="character-color-label"></div>
+          </div>
+          <label class="field">Pose
+            <select id="pose"></select>
+          </label>
+          <label class="field"><span class="value-row">Scale <output id="scale-value" for="scale">100%</output></span>
+            <input id="scale" type="range" min=".1" max="3" value="1" step=".01">
+          </label>
+          <div class="position-fields">
+            <label class="field">Position X <input type="number" id="position-x" step="1" value="540"></label>
+            <label class="field">Position Y <input type="number" id="position-y" step="1" value="540"></label>
+          </div>
+          <label class="field">Rotation (°) <input type="number" id="rotation" step="1" value="0"></label>
+          <details class="shortcut-hint">
+            <summary>Keyboard shortcuts</summary>
+            <dl>
+              <div><dt>Nudge</dt><dd><kbd>Arrow keys</kbd></dd></div>
+              <div><dt>Nudge farther</dt><dd><kbd>Shift</kbd> + <kbd>Arrow keys</kbd></dd></div>
+              <div><dt>Copy / Paste / Duplicate</dt><dd><kbd>Cmd / Ctrl</kbd> + <kbd>C / V / D</kbd></dd></div>
+              <div><dt>Duplicate and move</dt><dd><kbd>Option / Alt</kbd> + drag</dd></div>
+              <div><dt>Remove</dt><dd><kbd>Delete</kbd></dd></div>
+              <div><dt>Undo</dt><dd><kbd>Cmd / Ctrl</kbd> + <kbd>Z</kbd></dd></div>
+            </dl>
+          </details>
+        </div>
+      </section>
+
+      <section id="panel-walk" role="tabpanel" aria-labelledby="tab-walk" hidden>
+        <div class="control-section">
+          <div class="section-title"><h2>Walk cycle</h2><span class="section-index mono">01</span></div>
+          <label class="field">Cycle
+            <select id="walk-cycle"></select>
+          </label>
+          <label class="field"><span class="value-row">Speed <output id="walk-speed-value" for="walk-speed">1×</output></span>
+            <input id="walk-speed" type="range" min=".25" max="2.5" step=".05" value="1">
+          </label>
+          <label class="field">Cycle position <input id="walk-frame" type="range" min="0" max="1000" step="1" value="0"></label>
+          <label class="field">Direction
+            <select id="walk-direction"></select>
+          </label>
+          <label class="field">Motion
+            <select id="walk-motion">
+              <option value="one-way">One way</option>
+              <option value="oscillate">Back and forth</option>
+            </select>
+          </label>
+          <label class="field"><span class="value-row">Travel angle <output id="walk-angle-value" for="walk-angle">0°</output></span>
+            <input id="walk-angle" type="range" min="-180" max="180" step="1" value="0">
+          </label>
+          <label class="checkbox-field"><input id="walk-travel" type="checkbox" checked> Travel across artboard</label>
+          <button id="walk-play" type="button" class="button primary wide">Play</button>
+        </div>
+        <div class="control-section">
+          <div class="section-title"><h2>Walking stack</h2><span class="section-index mono">02</span></div>
+          <div class="item-list" id="walk-list"></div>
+          <div class="field">
+            <span class="field-label" id="walker-color-label">New walker color</span>
+            <div class="palette" id="walker-palette" role="group" aria-labelledby="walker-color-label"></div>
+          </div>
+          <button id="add-walker" type="button" class="button wide"><span aria-hidden="true">+</span> Add walker</button>
+          <button id="walk-copy-place" type="button" class="button wide">Copy frame to Place <span aria-hidden="true">↗</span></button>
+        </div>
+      </section>
+
+      <section id="panel-effect" role="tabpanel" aria-labelledby="tab-effect" hidden>
+        <div class="control-section">
+          <div class="section-title"><h2>Rendering</h2><span class="section-index mono">01</span></div>
+          <label class="field">Effect
+            <select id="effect"></select>
+          </label>
+          <label class="field"><span class="value-row">Amount <output id="effect-amount-value" for="effect-amount">4</output></span>
+            <input id="effect-amount" type="range" min="1" max="50" step="1" value="4">
+          </label>
+          <div id="effect-parameters" class="parameter-fields"></div>
+          <label class="field">Blend mode
+            <select id="effect-blend">
+              <option value="normal">Normal</option>
+              <option value="multiply">Multiply</option>
+              <option value="screen">Screen</option>
+              <option value="overlay">Overlay</option>
+              <option value="darken">Darken</option>
+              <option value="lighten">Lighten</option>
+              <option value="difference">Difference</option>
+              <option value="exclusion">Exclusion</option>
+            </select>
+          </label>
+          <label class="field">Filter
+            <select id="effect-filter">
+              <option value="none">None</option>
+              <option value="particles">Particles</option>
+              <option value="lofi">Lo-fi</option>
+              <option value="dither">Dither</option>
+              <option value="halftone">Halftone</option>
+              <option value="scanlines">Scanlines</option>
+              <option value="grain">Grain</option>
+              <option value="ink-bleed">Ink bleed</option>
+            </select>
+          </label>
+          <label class="field"><span class="value-row">Filter strength <output id="effect-filter-strength-value" for="effect-filter-strength">4</output></span>
+            <input id="effect-filter-strength" type="range" min="1" max="20" step="1" value="4">
+          </label>
+          <label class="field">Cycle position <input id="effect-frame" type="range" min="0" max="1000" step="1" value="0"></label>
+          <button id="effect-play" type="button" class="button primary wide">Play</button>
+        </div>
+      </section>
+
+      <section id="panel-physics" role="tabpanel" aria-labelledby="tab-physics" hidden>
+        <div class="control-section">
+          <div class="section-title"><h2>Physics</h2><span class="section-index mono">04</span></div>
+          <p class="control-note">Grab Opla anywhere on the artboard. Swing it, let it drop, or flick to throw.</p>
+          <label class="field"><span class="value-row">Gravity <output id="physics-gravity-value" for="physics-gravity">1×</output></span>
+            <input id="physics-gravity" type="range" min="0" max="2" step=".05" value="1">
+          </label>
+          <label class="field"><span class="value-row">Bounce <output id="physics-bounce-value" for="physics-bounce">55%</output></span>
+            <input id="physics-bounce" type="range" min="0" max="1" step=".05" value=".55">
+          </label>
+          <label class="checkbox-field"><input id="physics-pile" type="checkbox"> Stack characters on impact</label>
+          <label class="checkbox-field"><input id="physics-puppet" type="checkbox"> Swing arms and legs</label>
+          <label class="checkbox-field"><input id="physics-drop-copies" type="checkbox"> Click to add Opla</label>
+          <div class="row-actions">
+            <button id="physics-reset" type="button" class="button">Reset physics</button>
+            <button id="physics-remove" type="button" class="button">Remove selected Opla</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-camera" role="tabpanel" aria-labelledby="tab-camera" hidden>
+        <div class="control-section">
+          <div class="section-title"><h2>Camera</h2><span class="section-index mono">05</span></div>
+          <p class="control-note">Move in front of your camera to puppeteer the selected Opla. Step back so your arms and legs are in view.</p>
+          <div id="camera-preview" class="camera-preview" hidden>
+            <video id="camera-video" aria-label="Mirrored webcam preview" muted autoplay playsinline></video>
+          </div>
+          <p id="camera-status" class="camera-status mono" role="status" aria-live="polite">Camera off</p>
+          <label class="checkbox-field"><input id="camera-auto-zoom" type="checkbox" checked> Auto zoom</label>
+          <label class="field"><span class="value-row">Sensitivity <output id="camera-sensitivity-value" for="camera-sensitivity">1×</output></span>
+            <input id="camera-sensitivity" type="range" min=".25" max="2" step=".05" value="1">
+          </label>
+          <div class="row-actions">
+            <button id="camera-start" type="button" class="button primary">Start camera</button>
+            <button id="camera-stop" type="button" class="button" disabled>Stop</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+        <div class="control-section">
+          <div class="section-title"><h2>Artboard</h2><span class="section-index mono">06</span></div>
+          <div class="field">
+            <span class="field-label" id="background-color-label">Background color</span>
+            <div class="palette" id="background-palette" role="group" aria-labelledby="background-color-label"></div>
+          </div>
+          <label class="field">Canvas size
+            <select id="canvas-size">
+              <option value="1080x1080">Square · 1080 × 1080</option>
+              <option value="1080x1350">Portrait · 1080 × 1350</option>
+              <option value="1920x1080">Landscape · 1920 × 1080</option>
+              <option value="1080x1920">Story · 1080 × 1920</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <form id="canvas-custom" class="position-fields" hidden>
+            <label class="field">Width (px) <input type="number" id="canvas-width" required min="128" max="4096" step="1" value="1080"></label>
+            <label class="field">Height (px) <input type="number" id="canvas-height" required min="128" max="4096" step="1" value="1080"></label>
+            <button type="submit" class="button">Apply size</button>
+          </form>
+          <label class="checkbox-field"><input id="settings-transparent" type="checkbox"> Transparent background</label>
+          <label class="checkbox-field"><input id="show-guides" type="checkbox" checked> Show workspace grid</label>
+          <label class="checkbox-field"><input id="settings-snap" type="checkbox"> Snap to grid</label>
+          <label class="field">Grid size (px)
+            <input id="settings-grid-size" type="number" min="4" max="128" step="1" value="16">
+          </label>
+        </div>
+      </section>
+    </aside>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
