@@ -14,16 +14,18 @@ const modes = ['place', 'walk', 'effect', 'physics', 'camera', 'settings'];
 const physics = createPhysics();
 let camera;
 let cameraPose;
+let cameraFrameErased = false;
 let customSize = false;
 const ink = '#0C0C09';
+const cameraCompositions = ['mirror', 'center', 'scene'];
 const initialCharacter = { id: 1, color: ink, x: .5, y: .5, scale: 1, pose: 'neutral' };
 const defaults = {
   size: dimensions[0], background: '#EAFF74',
-  characters: [initialCharacter], walkers: [1], selected: 1,
+  characters: [], walkers: [],
   cycle: 'stroll', speed: 1, travel: true, time: 0,
   effect: 'none', amount: 4, params: {}, blend: 'normal', filter: 'none', filterStrength: 4,
   direction: 'right', angle: 0, walkMotion: 'one-way', guides: true, gravity: 1, bounce: .55, pile: false, puppet: false, dropCopies: false,
-  transparent: false, snap: false, gridSize: 16, cameraZoom: true, cameraSensitivity: 1,
+  transparent: false, snap: false, gridSize: 16, cameraZoom: true, cameraSensitivity: 1, cameraComposition: 'mirror', cameraColor: ink,
 };
 
 const hex = (value) => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value);
@@ -35,7 +37,10 @@ let tab = 'place';
 let usePlaceLayoutOnWalk = true;
 let zoom = 1;
 let playing = false;
-let sceneUndo;
+const undoHistory = [];
+const redoHistory = [];
+const historyLimit = 50;
+let historyBaseline;
 let boundsProbe;
 let walkerColor = '#F672FF';
 let palette = [];
@@ -101,6 +106,8 @@ function readProject(data) {
     transparent: data.transparent === true, snap: data.snap === true,
     gridSize: Math.round(number(data.gridSize, 16, 4, 128)),
     cameraZoom: data.cameraZoom !== false, cameraSensitivity: number(data.cameraSensitivity, 1, .25, 2),
+    cameraComposition: cameraCompositions.includes(data.cameraComposition) ? data.cameraComposition : defaults.cameraComposition,
+    cameraColor: hex(data.cameraColor) ? data.cameraColor : defaults.cameraColor,
   };
 }
 
@@ -111,11 +118,14 @@ function notify(message) {
   statusTimer = setTimeout(() => { status.textContent = ''; }, 3600);
 }
 
-function saveLocal(keepUndo = false) {
-  if (!keepUndo && sceneUndo) {
-    sceneUndo = undefined;
-    $('undo-scene').hidden = true;
+function saveLocal(alreadyRecorded = false) {
+  const next = historySnapshot();
+  if (!alreadyRecorded && historyBaseline && next.fingerprint !== historyBaseline.fingerprint) {
+    pushHistory(undoHistory, historyBaseline);
+    redoHistory.length = 0;
   }
+  historyBaseline = next;
+  updateHistoryControls();
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch { /* Project export remains available. */ }
@@ -154,7 +164,10 @@ function updateCanvas() {
 function rebuildScene() {
   if (!rig) return;
   const stack = state.walkers.map((id) => state.characters.find((character) => character.id === id));
-  const display = tab === 'walk' ? stack : state.characters;
+  let display = tab === 'walk' ? stack : state.characters;
+  if (tab === 'camera' && state.cameraComposition !== 'scene') {
+    display = cameraFrameErased ? [] : [{ ...initialCharacter, color: state.cameraColor }];
+  }
   const effect = tab === 'effect' ? state.effect : 'none';
   art.replaceChildren();
   effectDefs.replaceChildren();
@@ -175,7 +188,7 @@ function rebuildScene() {
     count = Math.min(count, copyBudget);
     const trails = Array.from({ length: count }, () => rig.create());
     const main = rig.create();
-    if (['place', 'physics', 'camera'].includes(tab)) main.node.dataset.character = character.id;
+    if (tab === 'place' || tab === 'physics') main.node.dataset.character = character.id;
     for (const entry of [...trails, main]) {
       if (tab === 'effect' && state.blend !== 'normal') entry.node.style.mixBlendMode = state.blend;
       art.append(entry.node);
@@ -214,6 +227,11 @@ function renderScene() {
   const base = Math.min(width, height) / 1080 * .99;
   const frame = Math.floor(state.time * fps) / fps;
   const params = effectOptions(state.effect, state.params[state.effect]);
+  const tracked = tab === 'camera' ? cameraPose : null;
+  const gain = state.cameraSensitivity;
+  const cameraScale = tracked && state.cameraZoom ? clamp(1 + ((tracked.scale ?? 1) - 1) * gain, .45, 2.2) : 1;
+  const cameraMovement = cameraOffset(tracked, width, height);
+  const trackedPose = tracked ? Object.fromEntries(Object.entries(tracked.pose).map(([key, value]) => [key, value * gain])) : null;
 
   for (const [index, { character, animated, effect, trails, main }] of scene.entries()) {
     const scale = character.scale * base;
@@ -221,25 +239,20 @@ function renderScene() {
     const x = character.x * width;
     const y = character.y * height;
     const body = tab === 'physics' ? physics.bodies.get(character.id) : null;
-    const tracked = tab === 'camera' && character.id === state.selected ? cameraPose : null;
-    const gain = state.cameraSensitivity;
-    const cameraScale = tracked && state.cameraZoom ? clamp(1 + ((tracked.scale ?? 1) - 1) * gain, .45, 2.2) : 1;
 
     function draw(entry, copy = {}) {
       const showPlacement = tab === 'walk' && !playing && state.time === 0;
       const movement = animated && !showPlacement
         ? characterMovement(character, copy.time ?? time, width, height, scale, copy)
         : { x: 0, y: 0, rotation: character.rotation ?? 0, flip: character.flip, pose: character.frame ?? poses[character.pose] };
-      const pose = tracked
-        ? Object.fromEntries(Object.entries(tracked.pose).map(([key, value]) => [key, value * gain]))
-        : { ...movement.pose };
+      const pose = { ...(trackedPose ?? movement.pose) };
       for (const [key, value] of Object.entries(state.puppet ? body?.puppetPose ?? {} : {})) pose[key] = (pose[key] ?? 0) + value;
       entry.update({
         color: copy.color ?? character.color, scale: scale * (copy.scale ?? 1) * cameraScale,
         opacity: copy.opacity ?? 1, rotation: (body?.angle ?? 0) + (movement.rotation ?? 0) + (copy.rotation ?? 0),
         flip: Boolean(movement.flip) !== Boolean(copy.flip),
-        x: (body?.x ?? x) + movement.x + (copy.dx ?? 0) + (tracked?.x ?? 0) * gain * width * .65,
-        y: (body?.y ?? y) + (movement.y ?? 0) + (copy.dy ?? 0) + (tracked?.y ?? 0) * gain * height * .60,
+        x: (body?.x ?? x) + movement.x + (copy.dx ?? 0) + cameraMovement.x,
+        y: (body?.y ?? y) + (movement.y ?? 0) + (copy.dy ?? 0) + cameraMovement.y,
         pose,
       });
     }
@@ -260,6 +273,15 @@ function renderScene() {
     else draw(main, effect === 'continuous' ? copyAt(0) : {});
   }
   renderSelection();
+}
+
+function cameraOffset(tracked, width, height) {
+  if (!tracked || state.cameraComposition === 'center') return { x: 0, y: 0 };
+  if (state.cameraComposition === 'mirror') {
+    return { x: ((tracked.frameX ?? .5) - .5) * width, y: ((tracked.frameY ?? .5) - .5) * height };
+  }
+  const gain = state.cameraSensitivity;
+  return { x: tracked.x * gain * width * .65, y: tracked.y * gain * height * .60 };
 }
 
 function renderSelection() {
@@ -467,6 +489,12 @@ function refreshInspector() {
   $('physics-pile').checked = state.pile;
   $('physics-puppet').checked = state.puppet;
   $('physics-drop-copies').checked = state.dropCopies;
+  $('camera-composition').value = state.cameraComposition;
+  $('camera-color-field').hidden = state.cameraComposition === 'scene';
+  paletteControls('camera-palette', state.cameraColor, 'Camera Opla color', (color, refresh) => {
+    state.cameraColor = color;
+    changed(refresh);
+  });
   $('camera-auto-zoom').checked = state.cameraZoom;
   $('camera-sensitivity').value = state.cameraSensitivity;
   $('camera-sensitivity-value').textContent = `${state.cameraSensitivity}×`;
@@ -506,15 +534,60 @@ function sceneAction(message, apply) {
   rememberScene();
   apply();
   changed(true, true);
-  $('undo-scene').hidden = false;
   if (message) notify(message);
 }
 
-function rememberScene() {
-  sceneUndo = {
-    state: structuredClone(state), customSize, zoom, tab,
+function historySnapshot() {
+  const snapshot = structuredClone(state);
+  const { selected: selection, time, ...editable } = snapshot;
+  return {
+    state: snapshot, fingerprint: JSON.stringify(editable), customSize, zoom, tab, showSelection, cameraFrameErased,
     bodies: tab === 'physics' ? structuredClone(physics.bodies) : null,
   };
+}
+
+function pushHistory(history, snapshot) {
+  history.push(snapshot);
+  if (history.length > historyLimit) history.shift();
+}
+
+function updateHistoryControls() {
+  $('undo-scene').disabled = undoHistory.length === 0;
+  $('redo-scene').disabled = redoHistory.length === 0;
+}
+
+function rememberScene() {
+  pushHistory(undoHistory, historySnapshot());
+  redoHistory.length = 0;
+  updateHistoryControls();
+}
+
+function restoreHistory(from, to, message) {
+  if (drag || !from.length) return;
+  pushHistory(to, historySnapshot());
+  const previous = from.pop();
+  state = previous.state;
+  customSize = previous.customSize;
+  zoom = previous.zoom;
+  showSelection = previous.showSelection;
+  cameraFrameErased = previous.cameraFrameErased;
+  playing = false;
+  if (tab === 'physics') {
+    physics.reset(state.characters, ...size());
+    for (const [id, body] of previous.bodies ?? []) physics.bodies.set(id, body);
+  }
+  changed(true, true);
+  notify(message);
+}
+
+function clearScene() {
+  sceneAction('Artboard erased.', () => {
+    state.characters = [];
+    state.walkers = [];
+    state.selected = undefined;
+    playing = false;
+    physics.reset([], ...size());
+  });
 }
 
 function removeSelected() {
@@ -532,7 +605,7 @@ const resetFields = {
   walk: ['cycle', 'speed', 'travel', 'time', 'direction', 'angle', 'walkMotion'],
   effect: ['effect', 'amount', 'params', 'blend', 'filter', 'filterStrength'],
   physics: ['gravity', 'bounce', 'pile', 'puppet', 'dropCopies'],
-  camera: ['cameraZoom', 'cameraSensitivity'],
+  camera: ['cameraZoom', 'cameraSensitivity', 'cameraComposition', 'cameraColor'],
   settings: ['size', 'background', 'guides', 'transparent', 'snap', 'gridSize'],
 };
 
@@ -577,7 +650,7 @@ function addCharacter(walking) {
   const count = state.characters.length;
   const x = walking || !count ? .5 : [.66, .34, .72, .28, .5][(count - 1) % 5];
   const y = walking || !count ? .5 : [.54, .47, .42, .61, .35][(count - 1) % 5];
-  const color = walking ? walkerColor : palette[(count % Math.max(1, palette.length))]?.hex ?? ink;
+  const color = walking ? walkerColor : (count ? palette[count % palette.length]?.hex ?? ink : ink);
   state.characters.push({ id, color, x, y, scale: count && !walking ? .68 : 1, pose: 'neutral' });
   if (walking) state.walkers.push(id);
   state.selected = id;
@@ -587,7 +660,10 @@ function addCharacter(walking) {
 
 function setTab(next) {
   if (next === tab) return;
-  if (tab === 'camera') camera.stop();
+  if (tab === 'camera') {
+    camera.stop();
+    cameraFrameErased = false;
+  }
   if (drag) endDrag({ pointerId: drag.id, type: 'pointercancel' });
   tab = next;
   captured = null;
@@ -680,7 +756,7 @@ function addPhysicsCopy(point) {
 }
 
 stage.addEventListener('pointerdown', (event) => {
-  if (!['place', 'physics', 'camera'].includes(tab) || event.button !== 0 || drag) return;
+  if (!['place', 'physics'].includes(tab) || event.button !== 0 || drag) return;
   const scaling = tab === 'place' && event.target.hasAttribute('data-scale-handle');
   const rotating = tab === 'place' && event.target.hasAttribute('data-rotation-handle');
   const target = event.target.closest('[data-character]');
@@ -694,12 +770,6 @@ stage.addEventListener('pointerdown', (event) => {
   }
   event.preventDefault();
   state.selected = character.id;
-  if (tab === 'camera') {
-    captured = null;
-    renderScene();
-    saveLocal();
-    return;
-  }
   if (tab === 'place') { showSelection = true; refreshInspector(); renderSelection(); }
   if (tab === 'physics') {
     $('physics-remove').disabled = false;
@@ -779,7 +849,6 @@ function endDrag(event) {
     physics.release(event.timeStamp ?? performance.now(), event.type === 'pointerup' && !drag.added);
   }
   const keepUndo = tab === 'place' || drag.added;
-  if (drag.edited || drag.added) $('undo-scene').hidden = false;
   drag = null;
   delete stage.dataset.dragging;
   if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
@@ -886,9 +955,12 @@ function bindShortcuts() {
     if (event.defaultPrevented || isEditingField(event) || drag) return;
     const key = event.key.toLowerCase();
     const command = (event.metaKey || event.ctrlKey) && !event.altKey;
-    if (command && key === 'z' && !event.shiftKey && sceneUndo) {
-      event.preventDefault();
-      $('undo-scene').click();
+    if (command && (key === 'z' || key === 'y')) {
+      const redo = key === 'y' || event.shiftKey;
+      if ((redo ? redoHistory : undoHistory).length) {
+        event.preventDefault();
+        $(redo ? 'redo-scene' : 'undo-scene').click();
+      }
       return;
     }
     if (tab !== 'place') return;
@@ -903,12 +975,11 @@ function bindShortcuts() {
       event.preventDefault();
       const [width, height] = size();
       const step = event.shiftKey ? 10 : 1;
-      if (!event.repeat || !sceneUndo) rememberScene();
+      if (!event.repeat || !undoHistory.length) rememberScene();
       character.x = clamp(character.x + (Number(key === 'arrowright') - Number(key === 'arrowleft')) * step / width, 0, 1);
       character.y = clamp(character.y + (Number(key === 'arrowdown') - Number(key === 'arrowup')) * step / height, 0, 1);
       showSelection = true;
       changed(true, true);
-      $('undo-scene').hidden = false;
     }
   });
 }
@@ -939,30 +1010,10 @@ function bindControls() {
   });
   $('clear-scene').addEventListener('click', (event) => {
     event.target.closest('details').open = false;
-    sceneAction('All characters removed.', () => {
-      state.characters = [];
-      state.walkers = [];
-      state.selected = undefined;
-      playing = false;
-      physics.reset([], ...size());
-    });
+    clearScene();
   });
-  $('undo-scene').addEventListener('click', () => {
-    if (!sceneUndo) return;
-    const previous = sceneUndo;
-    state = previous.state;
-    customSize = previous.customSize;
-    zoom = previous.zoom;
-    playing = false;
-    if (tab === 'physics') {
-      physics.reset(state.characters, ...size());
-      if (previous.tab === 'physics') {
-        for (const [id, body] of previous.bodies) physics.bodies.set(id, body);
-      }
-    }
-    changed();
-    notify('Previous scene restored.');
-  });
+  $('undo-scene').addEventListener('click', () => restoreHistory(undoHistory, redoHistory, 'Edit undone.'));
+  $('redo-scene').addEventListener('click', () => restoreHistory(redoHistory, undoHistory, 'Edit redone.'));
   $('pose').addEventListener('change', (event) => {
     const character = selected();
     if (event.target.value === '__frame') return;
@@ -1065,7 +1116,16 @@ function bindControls() {
   $('physics-reset').addEventListener('click', () => {
     sceneAction('Physics positions reset.', () => physics.reset(state.characters, ...size()));
   });
-  $('camera-start').addEventListener('click', () => camera.start());
+  $('camera-composition').addEventListener('change', (event) => {
+    state.cameraComposition = event.target.value;
+    cameraFrameErased = false;
+    changed();
+  });
+  $('camera-start').addEventListener('click', () => {
+    cameraFrameErased = false;
+    rebuildScene();
+    camera.start();
+  });
   $('camera-stop').addEventListener('click', () => camera.stop());
   window.addEventListener('pagehide', () => camera.stop());
   $('zoom-in').addEventListener('click', () => setZoom(zoom + .25));
@@ -1148,6 +1208,16 @@ function bindControls() {
     saveLocal();
     notify('Frame captured. Export as SVG or PNG.');
   });
+  $('erase-frame').addEventListener('click', () => {
+    if (tab === 'camera' && state.cameraComposition !== 'scene') {
+      if (!cameraFrameErased) sceneAction('Artboard erased.', () => { cameraFrameErased = true; });
+      else captured = null;
+    } else if (state.characters.length) {
+      clearScene();
+    } else {
+      captured = null;
+    }
+  });
   for (const format of ['svg', 'png']) {
     $(`export-${format}`).addEventListener('click', (event) => {
       event.target.closest('details').open = false;
@@ -1177,7 +1247,9 @@ function bindControls() {
       usePlaceLayoutOnWalk = data.mode !== 'walk';
       setTab(modes.includes(data.mode) ? data.mode : 'place');
       if (tab === 'physics') physics.reset(state.characters, ...size());
-      changed();
+      undoHistory.length = 0;
+      redoHistory.length = 0;
+      changed(true, true);
       notify('Project opened.');
     } catch {
       notify('Choose a valid ANIMALOOP project file.');
@@ -1259,6 +1331,8 @@ async function init() {
   rebuildScene();
   refreshInspector();
   bindControls();
+  historyBaseline = historySnapshot();
+  updateHistoryControls();
 
   let last = performance.now();
   function tick(now) {

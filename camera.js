@@ -70,6 +70,10 @@ function getPose(landmarks, aspect) {
   const rightArm = angle(rightShoulder, rightWrist ?? point(14), aspect, 23, 112) - lean;
   const shoulderWidth = distance(leftShoulder, rightShoulder, aspect);
   const torsoLength = hips ? distance(hips, shoulders, aspect) : 0;
+  const frameCenter = hips ? midpoint(shoulders, hips) : {
+    x: shoulders.x,
+    y: shoulders.y + shoulderWidth * .35,
+  };
   const units = 132 / Math.max(.08, shoulderWidth, torsoLength * .8);
   const headOffset = localOffset(shoulders, face, aspect, lean, units);
   const leftHand = handOffset(leftWrist, leftShoulder, leftArm, -1, aspect, lean, units);
@@ -93,6 +97,7 @@ function getPose(landmarks, aspect) {
       hat: head * .2,
     },
     center: shoulders,
+    frameCenter,
     headOffset,
     shoulderWidth,
     torsoLength,
@@ -209,11 +214,15 @@ export function createCamera({ video, onPose, onStatus }) {
                 pose: { ...sample.pose, headX: clamp(headX, -55, 55), headY: clamp(headY, -58, 48) },
                 x: clamp((sample.center.x - baseline.center.x) * .8, -.32, .32),
                 y: clamp((sample.center.y - baseline.center.y) * .65, -.25, .25),
+                frameX: clamp(sample.frameCenter.x, 0, 1),
+                frameY: clamp(sample.frameCenter.y, 0, 1),
                 scale: clamp(shoulderRatio * .35 + torsoRatio * .65, .65, 1.65),
               };
               if (smoothed) {
                 next.x = interpolate(smoothed.x, next.x);
                 next.y = interpolate(smoothed.y, next.y);
+                next.frameX = interpolate(smoothed.frameX, next.frameX);
+                next.frameY = interpolate(smoothed.frameY, next.frameY);
                 next.scale = interpolate(smoothed.scale, next.scale);
                 for (const part of Object.keys(next.pose)) {
                   next.pose[part] = interpolate(smoothed.pose[part], next.pose[part]);

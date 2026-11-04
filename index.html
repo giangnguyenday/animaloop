@@ -15,7 +15,7 @@
     <h1 id="studio-title" class="header-caption mono">Cook your Opla</h1>
     <div class="header-actions">
       <details class="action-menu">
-        <summary class="button">Project <span aria-hidden="true">⌄</span></summary>
+        <summary class="button">Project <svg class="project-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m3 4.5 3 3 3-3"/></svg></summary>
         <div class="menu-content">
           <button type="button" id="project-open">Open project</button>
           <button type="button" id="project-save">Save project</button>
@@ -52,14 +52,25 @@
         </div>
         <div class="stage-footer">
           <div class="stage-meta mono"><span class="signal"></span><span id="canvas-dimensions">1080 × 1080</span><span class="units">PX</span></div>
-          <button type="button" class="button capture-button" id="capture"><span class="capture-icon" aria-hidden="true"></span> Capture frame</button>
+          <div class="frame-actions">
+            <button type="button" class="button history-button" id="undo-scene" aria-label="Undo" title="Undo" disabled>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5.5 3 2 6.5 5.5 10M2 6.5h8a4 4 0 0 1 4 4v2.25"/></svg>
+            </button>
+            <button type="button" class="button history-button" id="redo-scene" aria-label="Redo" title="Redo" disabled>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m10.5 3 3.5 3.5-3.5 3.5M14 6.5H6a4 4 0 0 0-4 4v2.25"/></svg>
+            </button>
+            <button type="button" class="button capture-button" id="erase-frame">
+              <svg class="erase-frame-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.3 9.8a1 1 0 0 1 0-1.4l5.6-5.6a1 1 0 0 1 1.4 0l3.9 3.9a1 1 0 0 1 0 1.4l-5 5H5.6zM5 5.7l5.3 5.3M8.2 13.1h5.5"/></svg>
+              Erase frame
+            </button>
+            <button type="button" class="button primary capture-button" id="capture"><span class="capture-icon" aria-hidden="true"></span> Capture frame</button>
+          </div>
         </div>
       </div>
       <div class="workspace-footer mono">
         <span>by Behalf</span>
         <div class="workspace-feedback">
           <span id="status" role="status" aria-live="polite"></span>
-          <button type="button" id="undo-scene" hidden>Undo</button>
         </div>
       </div>
     </section>
@@ -229,7 +240,18 @@
       <section id="panel-camera" role="tabpanel" aria-labelledby="tab-camera" hidden>
         <div class="control-section">
           <div class="section-title"><h2>Camera</h2><span class="section-index mono">05</span></div>
-          <p class="control-note">Move in front of your camera to puppeteer the selected Opla. Step back so your arms and legs are in view.</p>
+          <p class="control-note">Step back so your arms and legs are in view. Mirror follows your position in the camera, Center keeps one Opla in the middle, and Scene moves all Oplas from Place together.</p>
+          <label class="field">Composition
+            <select id="camera-composition">
+              <option value="mirror">Mirror</option>
+              <option value="center">Center</option>
+              <option value="scene">Scene</option>
+            </select>
+          </label>
+          <div class="field" id="camera-color-field">
+            <span class="field-label" id="camera-color-label">Opla color</span>
+            <div class="palette" id="camera-palette" role="group" aria-labelledby="camera-color-label"></div>
+          </div>
           <div id="camera-preview" class="camera-preview" hidden>
             <video id="camera-video" aria-label="Mirrored webcam preview" muted autoplay playsinline></video>
           </div>
