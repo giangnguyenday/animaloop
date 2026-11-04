@@ -42,7 +42,7 @@ button:disabled { opacity: .4; cursor: default; }
 .brand { display: inline-flex; align-items: center; justify-self: start; }
 .brand img { display: block; width: 94px; height: auto; }
 .header-caption { margin: 0; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.header-actions { display: flex; gap: 8px; justify-self: end; }
+.header-actions { display: flex; align-items: center; gap: 8px; justify-self: end; }
 .button {
   display: inline-flex;
   align-items: center;
@@ -63,9 +63,9 @@ button:disabled { opacity: .4; cursor: default; }
 .primary:hover:not(:disabled) { background: #36372f; }
 .action-menu { position: relative; }
 .action-menu summary { list-style: none; }
+.action-menu summary, .frame-button { block-size: 36px; }
 .action-menu summary::-webkit-details-marker { display: none; }
-.action-menu summary span { font-size: 15px; }
-.project-chevron { display: block; flex: none; }
+.action-icon { display: block; flex: none; }
 .menu-content {
   position: absolute;
   z-index: 4;
@@ -93,13 +93,9 @@ button:disabled { opacity: .4; cursor: default; }
 .stage-footer { border-top: 1px solid var(--line); flex-wrap: wrap; }
 .artboard-name, .stage-meta { display: inline-flex; align-items: center; gap: 8px; font-size: 10px; white-space: nowrap; }
 .artboard-number, .units { color: var(--muted); }
-.frame-icon, .capture-icon { display: inline-block; flex: none; width: 12px; height: 12px; border: 1px dashed currentColor; }
-.capture-icon { border-style: solid; border-radius: 2px; position: relative; }
-.capture-icon::after { content: ""; position: absolute; inset: 2px; border: 1px solid currentColor; border-radius: 50%; }
-.capture-button { min-height: 32px; }
+.frame-icon { display: inline-block; flex: none; width: 12px; height: 12px; border: 1px dashed currentColor; }
 .frame-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; }
-.history-button { width: 32px; min-height: 32px; padding: 0; }
-.erase-frame-icon { display: block; flex: none; }
+.frame-button { inline-size: 36px; padding: 0; }
 .zoom-group { display: flex; align-items: center; gap: 2px; }
 .zoom-group button { min-width: 30px; min-height: 28px; padding: 4px 6px; border: 0; border-radius: 4px; background: transparent; font-weight: 700; }
 .zoom-group button:hover { background: var(--surface); }
