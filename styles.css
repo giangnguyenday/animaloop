@@ -58,9 +58,9 @@ button:disabled { opacity: .4; cursor: default; }
   white-space: nowrap;
   transition: background 150ms ease, border-color 150ms ease;
 }
-.button:hover:not(:disabled) { background: var(--surface); border-color: var(--ink); }
-.primary { color: var(--paper); background: var(--ink); border-color: var(--ink); }
-.primary:hover:not(:disabled) { background: #36372f; }
+.button:hover:not(:disabled) { background-color: var(--surface); border-color: var(--ink); }
+.primary { color: var(--paper); background-color: var(--ink); background-clip: padding-box; border-color: transparent; }
+.primary:hover:not(:disabled) { background-color: #36372f; border-color: transparent; }
 .action-menu { position: relative; }
 .action-menu summary { list-style: none; }
 .action-menu summary, .frame-button { block-size: 36px; }
