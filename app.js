@@ -3,6 +3,7 @@ import { cycles, cycleLabels, poses, poseLabels, walkAt, walkDirectionLabels } f
 import { applyRenderFilter, blendModes, copyCount, effectCopy, effectLabels, effectOptions, effectParameters, renderFilters } from './effects.js';
 import { createPhysics } from './physics.js';
 import { createCamera } from './camera.js';
+import { download, svgToPng } from './image-export.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -42,7 +43,7 @@ const redoHistory = [];
 const historyLimit = 50;
 let historyBaseline;
 let boundsProbe;
-let walkerColor = '#F672FF';
+let walkerColor = '#F689FD';
 let palette = [];
 let rig;
 let art;
@@ -260,7 +261,7 @@ function renderScene() {
     const count = trails.length;
     const copyAt = (i) => effectCopy(effect, {
       i, count, time, frame, base, width, height, x, y, scale, index, cycleSpeed: cycles[state.cycle].travel * (character.walkSpeed ?? 1), travel: state.travel,
-    }, params);
+    }, params, palette);
     for (const [trailIndex, entry] of trails.entries()) {
       const i = count - trailIndex;
       if (effect === 'solitaire') {
@@ -350,7 +351,15 @@ function refreshEffectParameters() {
 function paletteControls(target, current, label, setColor) {
   const container = $(target);
   container.replaceChildren();
-  for (const { name, hex: color } of palette) {
+  let groupContainer;
+  let previousGroup;
+  for (const { name, hex: color, group } of palette) {
+    if (!groupContainer || group !== previousGroup) {
+      groupContainer = document.createElement('div');
+      groupContainer.className = 'palette-group';
+      container.append(groupContainer);
+      previousGroup = group;
+    }
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'swatch';
@@ -360,7 +369,7 @@ function paletteControls(target, current, label, setColor) {
     button.setAttribute('aria-pressed', String(color.toLowerCase() === current.toLowerCase()));
     button.disabled = !setColor;
     button.addEventListener('click', () => setColor(color));
-    container.append(button);
+    groupContainer.append(button);
   }
   const custom = document.createElement('label');
   custom.className = 'custom-color';
@@ -373,7 +382,7 @@ function paletteControls(target, current, label, setColor) {
   input.addEventListener('input', () => {
     if (!setColor) return;
     setColor(input.value, false);
-    for (const [index, button] of [...container.querySelectorAll('button')].entries()) {
+    for (const [index, button] of container.querySelectorAll('.swatch').entries()) {
       button.setAttribute('aria-pressed', String(palette[index].hex.toLowerCase() === input.value));
     }
   });
@@ -876,37 +885,12 @@ function snapshot() {
   };
 }
 
-function download(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
 async function exportImage(format) {
   if (!rig) return;
   const frame = captured ?? snapshot();
   try {
     if (format === 'svg') download(frame.svg, 'animaloop-opla.svg');
-    else {
-      const url = URL.createObjectURL(frame.svg);
-      try {
-        const image = new Image();
-        image.src = url;
-        await image.decode();
-        const canvas = document.createElement('canvas');
-        canvas.width = frame.width;
-        canvas.height = frame.height;
-        canvas.getContext('2d').drawImage(image, 0, 0);
-        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-        if (!blob) throw new Error('Canvas export failed.');
-        download(blob, 'animaloop-opla.png');
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-    }
+    else download(await svgToPng(frame.svg, frame.width, frame.height), 'animaloop-opla.png');
     notify(`${format.toUpperCase()} exported · ${frame.width} × ${frame.height}`);
   } catch {
     notify('Export failed. Try capturing the frame again.');
@@ -1272,7 +1256,7 @@ async function loadPalette() {
   if (!Array.isArray(entries)) throw new Error('palette.json needs an array of colors.');
   return entries.map((entry) => typeof entry === 'string' ? { name: entry, hex: entry } : entry)
     .filter((entry) => hex(entry?.hex))
-    .map((entry) => ({ name: entry.name || entry.hex, hex: entry.hex }));
+    .map(({ name, hex: color, group }) => ({ name: name || color, hex: color, group: typeof group === 'string' ? group : '' }));
 }
 
 async function init() {
@@ -1284,7 +1268,8 @@ async function init() {
   const [parts, colors] = await Promise.allSettled([loadRig(), loadPalette()]);
   if (colors.status === 'fulfilled') {
     palette = colors.value;
-    walkerColor = palette[1]?.hex ?? palette[0]?.hex ?? walkerColor;
+    walkerColor = palette.find(({ hex: color }) => color.toUpperCase() === walkerColor)?.hex
+      ?? palette[1]?.hex ?? palette[0]?.hex ?? walkerColor;
   } else {
     notify('Palette unavailable. Custom colors are still available.');
     console.error(colors.reason);

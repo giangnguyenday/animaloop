@@ -1,6 +1,6 @@
-# ANIMALOOP / Opla Studio
+# ANIMALOOP Studio
 
-A browser-based workspace for making Opla key visuals for the animation festival.
+A browser-based workspace for making Opla key visuals and posters for the animation festival.
 
 ## Run locally
 
@@ -10,7 +10,7 @@ From this folder, start a static server:
 python3 -m http.server 8765 --bind 127.0.0.1
 ```
 
-Open [Opla Studio](http://localhost:8765/). The editor loads the SVGs and palette over HTTP.
+Open [Cook Your Opla](http://localhost:8765/opla.html) or [Fry Your Poster](http://localhost:8765/poster.html). Use the Project menu to switch between editors.
 
 ## Make a key visual
 
@@ -22,11 +22,19 @@ Open [Opla Studio](http://localhost:8765/). The editor loads the SVGs and palett
 - **Settings** — choose a canvas preset or apply custom dimensions from 128 to 4096 pixels. Set a color or transparent background, control grid spacing, and enable snapping while placing characters.
 - **Capture frame** saves the current visual for export. **Erase frame** clears the artwork and any saved capture. Use Undo to restore the artwork. **Export** downloads the frame as an SVG or a full-size PNG. **Project** saves or opens editable JSON. The browser also remembers your last composition on the same local URL.
 
+## Make a poster
+
+Set the size and palette in **Artboard**. **Reset design** can restore the example or start a blank, aligned grid in either accent color. Use **Layout** to add columns and randomize the grid with or without keeping the column count. Drag a selected block’s edges to resize the grid. Shift-click to select more blocks. The artboard footer splits a block, merges blocks that form a rectangle, and swaps the accents of selected color blocks.
+
+Click a block and type to replace its letter. Press Delete or Backspace to restore its accent color. In **Type**, enter copy or reshuffle the words across the grid. Enable **Jumble grid** to randomize the layout at the same time. Spaces can move the next word to a different row.
+
+In **Add Opla**, select one block or Shift-click connected blocks, then place up to three Oplas per block. Choose a still pose or a movement cycle, adjust the fit and layer, and vary the sizes across a sequence. Pause or scrub the preview to choose a frame. **Settings** controls the rulers, grid lines, workspace dots, and reading order. PNG and SVG exports capture the current frame. Print PNGs use 300 ppi, and print SVGs use millimetres. The browser remembers the poster between visits.
+
 ## Swap assets
 
 Replace `src/o.svg`, `src/a.svg`, `src/p.svg`, or `src/l.svg` and refresh. Each component fits its existing rig slot, with mirrored copies for arms and legs. Use standalone vector SVGs with a positive viewBox, or pixel width and height. The importer uses one character color for visible fills and strokes and preserves transparency, cutouts, and supported local clip paths and masks. Outline text and convert embedded images or complex effects to vector shapes before replacing a component. For predictable registration, use a tight viewBox and the same part orientation as the original file.
 
-Edit `palette.json` to replace the swatches. Provide an array of hex strings or objects with `name` and `hex` fields. Refresh to pick up changes.
+Edit `palette.json` to replace the swatches. Provide an array of hex strings or objects with `name` and `hex` fields. Give adjacent colors the same optional `group` string to display them together. Refresh to pick up changes.
 
 ## References
 

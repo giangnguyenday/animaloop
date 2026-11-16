@@ -1,8 +1,10 @@
 [
-  { "name": "Paper", "hex": "#F5F5F5" },
-  { "name": "Orchid", "hex": "#F672FF" },
-  { "name": "Acid", "hex": "#EAFF74" },
-  { "name": "Tangerine", "hex": "#FF923E" },
-  { "name": "Umber", "hex": "#423625" },
-  { "name": "Ice", "hex": "#A7F9FF" }
+  { "name": "Umber", "hex": "#423625", "group": "1" },
+  { "name": "Paper", "hex": "#F5F5F5", "group": "1" },
+  { "name": "Ice", "hex": "#A7F9FF", "group": "2" },
+  { "name": "Acid", "hex": "#EAFF74", "group": "2" },
+  { "name": "Blue", "hex": "#3558E3", "group": "2" },
+  { "name": "Orchid", "hex": "#F689FD", "group": "3" },
+  { "name": "Tangerine", "hex": "#FE9544", "group": "3" },
+  { "name": "Raspberry", "hex": "#CE2163", "group": "3" }
 ]

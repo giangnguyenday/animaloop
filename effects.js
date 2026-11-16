@@ -38,12 +38,11 @@ export function copyCount(effect, amount, animated) {
 }
 
 const repeat = (x, length) => ((x % length) + length) % length;
-const spectrum = ['#F672FF', '#FF923E', '#EAFF74', '#A7F9FF', '#F5F5F5'];
 const radians = (degrees) => degrees * Math.PI / 180;
 const noise = (seed) => repeat(Math.sin(seed * 127.1) * 43758.5453, 1);
 const vector = (angle, distance) => ({ dx: Math.cos(radians(angle)) * distance, dy: Math.sin(radians(angle)) * distance });
 
-export function effectCopy(effect, { i, count, time, frame, base, width, height, x, y, scale, index, cycleSpeed, travel }, p) {
+export function effectCopy(effect, { i, count, time, frame, base, width, height, x, y, scale, index, cycleSpeed, travel }, p, palette = []) {
   const fade = (count + 1 - i) / (count + 1);
   switch (effect) {
     case 'onion':
@@ -88,7 +87,11 @@ export function effectCopy(effect, { i, count, time, frame, base, width, height,
       };
     }
     case 'prism':
-      return { ...vector(p.angle + (i % 2 ? 0 : 180), Math.ceil(i / 2) * p.spacing * base), color: spectrum[(i - 1) % spectrum.length], opacity: p.opacity / 100 };
+      return {
+        ...vector(p.angle + (i % 2 ? 0 : 180), Math.ceil(i / 2) * p.spacing * base),
+        color: palette[(i - 1) % palette.length]?.hex,
+        opacity: p.opacity / 100,
+      };
     case 'crowd': {
       const seed = p.seed * 131 + i * 17 + index * 59;
       const spread = p.spread / 100;
