@@ -1,14 +1,19 @@
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const fontUrl = new URL('./src/fonts/google-sans-flex-poster.ttf.gz', import.meta.url);
+const fontUrl = new URL('./src/fonts/google-sans-flex-poster-variable.ttf.gz', import.meta.url);
 const fontFamily = 'Google Sans Flex Poster';
 const fontSize = 1000;
-const weight = 700;
 const minWidth = 25;
+const normalWidth = 100;
 const maxWidth = 151;
+const lightWeight = 450;
+const normalWeight = 700;
+const heavyWeight = 900;
 const fallbackFamily = 'sans-serif';
 
-// The poster face retains the width axis of the official Google Sans Flex font.
-const fontDescriptors = { weight: String(weight), stretch: `${minWidth}% ${maxWidth}%` };
+const fontDescriptors = {
+  weight: `${lightWeight} ${heavyWeight}`,
+  stretch: `${minWidth}% ${maxWidth}%`,
+};
 let font;
 let fontBytes;
 let harfBuzz;
@@ -61,17 +66,34 @@ function embeddedFont() {
     for (let index = 0; index < bytes.length; index += 8192) {
       binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
     }
-    embeddedFontStyle = `@font-face { font-family: '${fontFamily}'; font-weight: ${weight}; font-stretch: ${fontDescriptors.stretch}; src: url('data:font/ttf;base64,${btoa(binary)}') format('truetype'); }`;
+    embeddedFontStyle = `@font-face { font-family: '${fontFamily}'; font-weight: ${fontDescriptors.weight}; font-stretch: ${fontDescriptors.stretch}; src: url('data:font/ttf;base64,${btoa(binary)}') format('truetype'); }`;
   }
   const style = svg('style', {});
   style.textContent = embeddedFontStyle;
   return style;
 }
 
+function weightAtWidth(width) {
+  if (width <= normalWidth) {
+    const progress = (width - minWidth) / (normalWidth - minWidth);
+    return Math.round(lightWeight + progress * (normalWeight - lightWeight));
+  }
+  const progress = (width - normalWidth) / (maxWidth - normalWidth);
+  return Math.round(normalWeight + progress * (heavyWeight - normalWeight));
+}
+
+function setGlyphVariations(width, weight) {
+  font.setVariations([
+    new harfBuzz.Variation('wdth', width),
+    new harfBuzz.Variation('wght', weight),
+  ]);
+}
+
 function glyphAtWidth(letter, width) {
   const key = `${letter}:${width}`;
   if (!glyphCache.has(key)) {
-    font.setVariations([new harfBuzz.Variation('wdth', width)]);
+    const weight = weightAtWidth(width);
+    setGlyphVariations(width, weight);
     shapingBuffer.reset();
     shapingBuffer.addText(letter);
     shapingBuffer.guessSegmentProperties();
@@ -102,7 +124,11 @@ function glyphAtWidth(letter, width) {
     }
 
     if (glyphCache.size >= 3000) glyphCache.clear();
-    glyphCache.set(key, { glyphs, supported, x: left, y: top, width: right - left, height: bottom - top });
+    glyphCache.set(key, {
+      glyphs, supported,
+      x: left, y: top, width: right - left, height: bottom - top,
+      variationWidth: width, variationWeight: weight,
+    });
   }
   return glyphCache.get(key);
 }
@@ -112,10 +138,10 @@ function fitLetter(letter, targetWidth, targetHeight) {
   const narrowest = glyphAtWidth(letter, minWidth);
   const widest = glyphAtWidth(letter, maxWidth);
   if (targetRatio <= narrowest.width / narrowest.height) {
-    return { ...narrowest, variationWidth: minWidth };
+    return narrowest;
   }
   if (targetRatio >= widest.width / widest.height) {
-    return { ...widest, variationWidth: maxWidth };
+    return widest;
   }
   let narrow = minWidth;
   let wide = maxWidth;
@@ -125,14 +151,13 @@ function fitLetter(letter, targetWidth, targetHeight) {
     if (shape.width / shape.height < targetRatio) narrow = middle;
     else wide = middle;
   }
-  const width = (narrow + wide) / 2;
-  return { ...glyphAtWidth(letter, width), variationWidth: width };
+  return glyphAtWidth(letter, (narrow + wide) / 2);
 }
 
 function fallbackGlyph(letter) {
   if (!measureContext) {
     measureContext = document.createElement('canvas').getContext('2d');
-    measureContext.font = `${weight} ${fontSize}px ${fallbackFamily}`;
+    measureContext.font = `${normalWeight} ${fontSize}px ${fallbackFamily}`;
   }
   const metrics = measureContext.measureText(letter);
   return {
@@ -145,7 +170,7 @@ function fallbackGlyph(letter) {
 
 function drawLetter(cell, color, outline, allowFallbackText) {
   const letter = cell.text.normalize('NFC');
-  const { supported } = glyphAtWidth(letter, 100);
+  const { supported } = glyphAtWidth(letter, normalWidth);
   if (outline && !supported && !allowFallbackText) {
     throw new Error(`Google Sans Flex does not include “${cell.text}”. Choose SVG with editable text to keep this character.`);
   }
@@ -164,7 +189,7 @@ function drawLetter(cell, color, outline, allowFallbackText) {
   const attributes = { fill: color, transform: `translate(${x} ${y}) scale(${scaleX} ${scaleY})` };
 
   if (outline && supported) {
-    font.setVariations([new harfBuzz.Variation('wdth', glyph.variationWidth)]);
+    setGlyphVariations(glyph.variationWidth, glyph.variationWeight);
     const outlines = svg('g', {
       fill: color,
       transform: `translate(${x} ${y}) scale(${scaleX} ${-scaleY})`,
@@ -180,10 +205,10 @@ function drawLetter(cell, color, outline, allowFallbackText) {
     ...attributes,
     'font-family': supported ? `'${fontFamily}', 'Google Sans Flex', ${fallbackFamily}` : fallbackFamily,
     'font-size': fontSize,
-    'font-weight': weight,
+    'font-weight': glyph.variationWeight ?? normalWeight,
   });
   if (supported) {
-    text.setAttribute('style', `font-variation-settings: 'wdth' ${glyph.variationWidth}; font-optical-sizing: none;`);
+    text.setAttribute('style', `font-variation-settings: 'wdth' ${glyph.variationWidth}, 'wght' ${glyph.variationWeight}; font-optical-sizing: none;`);
   }
   text.textContent = cell.text;
   return text;

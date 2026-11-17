@@ -5,7 +5,7 @@ import {
   splitCell, canSplitCell, mergeCells, canMergeCells, updateCell, setBlockRole,
   randomizeLayout, randomizeTextPositions, clearTextBlocks,
 } from './poster-model.js';
-import { loadPosterFont, renderPoster } from './poster-render.js';
+import { loadPosterFont, renderPoster } from './poster-render.js?v=variable-font';
 import { download, setPngDensity, svgToPng } from './image-export.js';
 import { cycles, cycleLabels, poseLabels } from './motion.js';
 import {
