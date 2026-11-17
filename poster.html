@@ -214,6 +214,18 @@
       </section>
 
       <section id="poster-panel-opla" role="tabpanel" aria-labelledby="poster-tab-opla" hidden>
+        <form class="control-section" id="poster-shuffle-opla-form">
+          <div class="section-title"><h2>Shuffle</h2></div>
+          <div class="field">
+            <div class="value-row">
+              <label for="poster-shuffle-opla-amount">Amount</label>
+              <output id="poster-shuffle-opla-capacity" for="poster-shuffle-opla-amount"></output>
+            </div>
+            <input type="number" id="poster-shuffle-opla-amount" min="1" step="1" value="3" required disabled aria-describedby="poster-shuffle-opla-capacity">
+          </div>
+          <p class="control-note">Replaces all Oplas on the poster.</p>
+          <button type="submit" class="button wide" id="poster-shuffle-opla" disabled>Shuffle Oplas</button>
+        </form>
         <div class="control-section">
           <div class="section-title"><h2>Opla</h2></div>
           <p class="control-note" id="poster-opla-selection" aria-live="polite">Select a block or Shift-click neighboring blocks.</p>
@@ -321,6 +333,6 @@
       </section>
     </aside>
   </main>
-  <script type="module" src="./poster.js?v=variable-font"></script>
+  <script type="module" src="./poster.js?v=opla-shuffle"></script>
 </body>
 </html>

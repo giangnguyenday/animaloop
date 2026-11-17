@@ -83,6 +83,39 @@ export function createPosterOpla(placements, cells, ids) {
   return { id: `opla-${next}`, cellIds: cellsForIds(cells, ids).map(({ id }) => id), ...defaultOpla };
 }
 
+function colorCells(cells) {
+  return cells.filter(({ role, text, block }) => (
+    !text && block !== 'text' && (role === 'accentA' || role === 'accentB')
+  ));
+}
+
+export function shufflePosterOplaCapacity(cells) {
+  return colorCells(cells).length;
+}
+
+function shuffle(items, random) {
+  for (let index = items.length - 1; index > 0; index--) {
+    const other = Math.floor(random() * (index + 1));
+    [items[index], items[other]] = [items[other], items[index]];
+  }
+  return items;
+}
+
+export function shufflePosterOplas(cells, amount, random = Math.random) {
+  const candidates = colorCells(cells);
+  const count = Math.floor(bounded(amount, 0, candidates.length, 0));
+  const selected = shuffle(candidates, random).slice(0, count);
+  const generated = [];
+  let poseChoices = [];
+  for (const { id } of selected) {
+    const placement = createPosterOpla(generated, cells, [id]);
+    if (!placement) continue;
+    if (!poseChoices.length) poseChoices = shuffle(Object.keys(poses), random);
+    generated.push(updatePosterOpla(placement, { pose: poseChoices.pop() }));
+  }
+  return generated;
+}
+
 export function duplicatePosterOpla(placements, cells, source, ids = source.cellIds) {
   if (posterOplaCapacity(placements, cells, ids) < source.count) return null;
   const placement = createPosterOpla(placements, cells, ids);

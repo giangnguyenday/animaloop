@@ -3,11 +3,14 @@ const fontUrl = new URL('./src/fonts/google-sans-flex-poster-variable.ttf.gz', i
 const fontFamily = 'Google Sans Flex Poster';
 const fontSize = 1000;
 const minWidth = 25;
-const normalWidth = 100;
 const maxWidth = 151;
-const lightWeight = 450;
+// Block width divided by height, calibrated to the narrow E, round O, and wide M.
+const narrowRatio = .35;
+const normalRatio = 1.11;
+const wideRatio = 2.4;
+const lightWeight = 400;
 const normalWeight = 700;
-const heavyWeight = 900;
+const heavyWeight = 1000;
 const fallbackFamily = 'sans-serif';
 
 const fontDescriptors = {
@@ -73,12 +76,13 @@ function embeddedFont() {
   return style;
 }
 
-function weightAtWidth(width) {
-  if (width <= normalWidth) {
-    const progress = (width - minWidth) / (normalWidth - minWidth);
+function weightForAspectRatio(aspectRatio) {
+  const ratio = Math.max(narrowRatio, Math.min(wideRatio, aspectRatio));
+  if (ratio <= normalRatio) {
+    const progress = (ratio - narrowRatio) / (normalRatio - narrowRatio);
     return Math.round(lightWeight + progress * (normalWeight - lightWeight));
   }
-  const progress = (width - normalWidth) / (maxWidth - normalWidth);
+  const progress = (ratio - normalRatio) / (wideRatio - normalRatio);
   return Math.round(normalWeight + progress * (heavyWeight - normalWeight));
 }
 
@@ -89,10 +93,9 @@ function setGlyphVariations(width, weight) {
   ]);
 }
 
-function glyphAtWidth(letter, width) {
-  const key = `${letter}:${width}`;
+function glyphAtWidth(letter, width, weight) {
+  const key = `${letter}:${width}:${weight}`;
   if (!glyphCache.has(key)) {
-    const weight = weightAtWidth(width);
     setGlyphVariations(width, weight);
     shapingBuffer.reset();
     shapingBuffer.addText(letter);
@@ -127,19 +130,18 @@ function glyphAtWidth(letter, width) {
     glyphCache.set(key, {
       glyphs, supported,
       x: left, y: top, width: right - left, height: bottom - top,
-      variationWidth: width, variationWeight: weight,
+      variationWidth: width,
     });
   }
   return glyphCache.get(key);
 }
 
-function fitLetter(letter, targetWidth, targetHeight) {
-  const targetRatio = targetWidth / targetHeight;
-  const narrowest = glyphAtWidth(letter, minWidth);
-  const widest = glyphAtWidth(letter, maxWidth);
-  if (targetRatio <= narrowest.width / narrowest.height) {
+function fitLetter(letter, targetRatio, weight) {
+  const narrowest = glyphAtWidth(letter, minWidth, weight);
+  if (!narrowest.supported || targetRatio <= narrowest.width / narrowest.height) {
     return narrowest;
   }
+  const widest = glyphAtWidth(letter, maxWidth, weight);
   if (targetRatio >= widest.width / widest.height) {
     return widest;
   }
@@ -147,18 +149,16 @@ function fitLetter(letter, targetWidth, targetHeight) {
   let wide = maxWidth;
   while (wide - narrow > .5) {
     const middle = Math.round(narrow + wide) / 2;
-    const shape = glyphAtWidth(letter, middle);
+    const shape = glyphAtWidth(letter, middle, weight);
     if (shape.width / shape.height < targetRatio) narrow = middle;
     else wide = middle;
   }
-  return glyphAtWidth(letter, (narrow + wide) / 2);
+  return glyphAtWidth(letter, (narrow + wide) / 2, weight);
 }
 
-function fallbackGlyph(letter) {
-  if (!measureContext) {
-    measureContext = document.createElement('canvas').getContext('2d');
-    measureContext.font = `${normalWeight} ${fontSize}px ${fallbackFamily}`;
-  }
+function fallbackGlyph(letter, weight) {
+  measureContext ??= document.createElement('canvas').getContext('2d');
+  measureContext.font = `${weight} ${fontSize}px ${fallbackFamily}`;
   const metrics = measureContext.measureText(letter);
   return {
     x: -metrics.actualBoundingBoxLeft,
@@ -170,13 +170,15 @@ function fallbackGlyph(letter) {
 
 function drawLetter(cell, color, outline, allowFallbackText) {
   const letter = cell.text.normalize('NFC');
-  const { supported } = glyphAtWidth(letter, normalWidth);
+  const targetWidth = cell.width * .94;
+  const targetHeight = cell.height * .98;
+  const weight = weightForAspectRatio(cell.width / cell.height);
+  const fit = fitLetter(letter, targetWidth / targetHeight, weight);
+  const { supported } = fit;
   if (outline && !supported && !allowFallbackText) {
     throw new Error(`Google Sans Flex does not include “${cell.text}”. Choose SVG with editable text to keep this character.`);
   }
-  const targetWidth = cell.width * .94;
-  const targetHeight = cell.height * .98;
-  const glyph = supported ? fitLetter(letter, targetWidth, targetHeight) : fallbackGlyph(letter);
+  const glyph = supported ? fit : fallbackGlyph(letter, weight);
   if (!(glyph.width > 0 && glyph.height > 0)) return;
 
   const scaleY = targetHeight / glyph.height;
@@ -189,7 +191,7 @@ function drawLetter(cell, color, outline, allowFallbackText) {
   const attributes = { fill: color, transform: `translate(${x} ${y}) scale(${scaleX} ${scaleY})` };
 
   if (outline && supported) {
-    setGlyphVariations(glyph.variationWidth, glyph.variationWeight);
+    setGlyphVariations(glyph.variationWidth, weight);
     const outlines = svg('g', {
       fill: color,
       transform: `translate(${x} ${y}) scale(${scaleX} ${-scaleY})`,
@@ -205,10 +207,10 @@ function drawLetter(cell, color, outline, allowFallbackText) {
     ...attributes,
     'font-family': supported ? `'${fontFamily}', 'Google Sans Flex', ${fallbackFamily}` : fallbackFamily,
     'font-size': fontSize,
-    'font-weight': glyph.variationWeight ?? normalWeight,
+    'font-weight': weight,
   });
   if (supported) {
-    text.setAttribute('style', `font-variation-settings: 'wdth' ${glyph.variationWidth}, 'wght' ${glyph.variationWeight}; font-optical-sizing: none;`);
+    text.setAttribute('style', `font-variation-settings: 'wdth' ${glyph.variationWidth}, 'wght' ${weight}; font-optical-sizing: none;`);
   }
   text.textContent = cell.text;
   return text;

@@ -4,14 +4,15 @@ import {
   maxColumns, setColumnCount, moveColumnBoundary, moveRowBoundary, canMoveRowBoundary,
   splitCell, canSplitCell, mergeCells, canMergeCells, updateCell, setBlockRole,
   randomizeLayout, randomizeTextPositions, clearTextBlocks,
-} from './poster-model.js';
-import { loadPosterFont, renderPoster } from './poster-render.js?v=variable-font';
+} from './poster-model.js?v=opla-shuffle';
+import { loadPosterFont, renderPoster } from './poster-render.js?v=block-proportions';
 import { download, setPngDensity, svgToPng } from './image-export.js';
 import { cycles, cycleLabels, poseLabels } from './motion.js';
 import {
   loadPosterOplaRig, readPosterOplas, createPosterOpla, updatePosterOpla, posterOplaCapacity,
   createPosterOplaLayers, mountPosterOplaLayers, duplicatePosterOpla, minPosterOplaSize, maxPosterOplaSize,
-} from './poster-opla.js';
+  shufflePosterOplaCapacity, shufflePosterOplas,
+} from './poster-opla.js?v=opla-shuffle';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -40,7 +41,7 @@ try {
   if (saved) {
     const input = JSON.parse(saved);
     state = readPoster(input);
-    state = { ...state, oplas: readPosterOplas(input.oplas, posterCells(state)) };
+    state = { ...state, oplas: readPosterOplas(state.oplas ?? input?.oplas, posterCells(state)) };
   }
 } catch { /* Open the sample if the saved poster is unavailable. */ }
 try {
@@ -193,6 +194,15 @@ function syncOplaPlayback() {
 
 function updateOplaControls(cells) {
   const placements = state.oplas ?? [];
+  const shuffleCapacity = shufflePosterOplaCapacity(cells);
+  const amount = $('poster-shuffle-opla-amount');
+  amount.max = Math.max(1, shuffleCapacity);
+  if (shuffleCapacity && amount.valueAsNumber > shuffleCapacity) amount.value = shuffleCapacity;
+  amount.disabled = !oplaRig || !shuffleCapacity;
+  $('poster-shuffle-opla').disabled = amount.disabled;
+  $('poster-shuffle-opla-capacity').textContent = shuffleCapacity
+    ? `${shuffleCapacity} color ${shuffleCapacity === 1 ? 'block' : 'blocks'}` : 'No color blocks';
+
   const placement = selectedOpla();
   if (!placement) activeOplaId = '';
   const ids = placement?.cellIds ?? [...selectedIds];
@@ -218,7 +228,7 @@ function updateOplaControls(cells) {
   for (const key of ['fit', 'layer', 'mode', 'cycle', 'scale']) $(`poster-opla-${key}`).value = options[key];
   const pose = $('poster-opla-pose');
   const frameOption = pose.querySelector('option[value="__frame"]');
-  if (options.frame && !frameOption) pose.append(new Option('Copied pose', '__frame'));
+  if (options.frame && !frameOption) pose.append(new Option('Custom pose', '__frame'));
   else if (!options.frame) frameOption?.remove();
   pose.value = options.frame ? '__frame' : options.pose;
   $('poster-opla-rotation').value = Math.round(options.rotation) % 360;
@@ -700,6 +710,17 @@ for (const key of ['size', 'x', 'y']) {
 }
 $('poster-opla-placement').addEventListener('change', (event) => {
   selectOplaPlacement(event.target.value);
+});
+$('poster-shuffle-opla-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!oplaRig) return;
+  const amount = $('poster-shuffle-opla-amount').valueAsNumber;
+  const oplas = shufflePosterOplas(posterCells(state), amount);
+  if (!oplas.length) return;
+  activeOplaId = '';
+  oplaTime = 0;
+  apply({ ...state, oplas });
+  notify(`Shuffled ${oplas.length} ${oplas.length === 1 ? 'Opla' : 'Oplas'}.`);
 });
 $('poster-opla-add').addEventListener('click', () => {
   const placements = state.oplas ?? [];

@@ -1,4 +1,5 @@
 import { flowPosterText, posterReadingOrder, segmentPosterText as segments } from './poster-flow.js';
+import { updatePosterOpla } from './poster-opla.js?v=opla-shuffle';
 
 export const schemes = {
   1: { name: 'Zesty', accentA: '#A7F9FF', accentB: '#EAFF74', background: '#F5F5F5', text: '#423625', opla: '#3558E3' },
@@ -43,14 +44,31 @@ const sample = [
   [246, [[611, 'accentA'], [754, 'background', 'R', 7], [1350, 'accentA']]],
 ];
 
+// Each pose is anchored to the corresponding blocks of the example grid.
+const sampleOplas = [
+  { blocks: [[0, 1], [1, 2]], pose: 'kick', fit: 'crop', size: .71, x: -.25, y: .07,
+    frame: { leftArm: 2, rightArm: -49, leftLeg: 18, rightLeg: -68, rightLift: 23, head: -19, hat: -8, lean: -10, footDirection: 1 } },
+  { blocks: [[2, 1]], pose: 'stride', fit: 'bleed', size: .85, x: .10, y: .12, rotation: 62 },
+  { blocks: [[4, 0]], pose: 'lean', fit: 'crop', size: 1.03, x: .92, y: .04, rotation: -6 },
+  { blocks: [[0, 3]], pose: 'salute', fit: 'bleed', x: .20, y: -.19 },
+  { blocks: [[2, 3]], pose: 'stride', fit: 'crop', size: .52, x: -.55, y: -.22 },
+  { blocks: [[2, 3]], pose: 'jump', fit: 'bleed', size: .48, x: .85, y: -.36, rotation: -11 },
+  { blocks: [[3, 3]], pose: 'salute', fit: 'crop', size: .28, x: .65, y: -.17, rotation: -12 },
+];
+
 export function createPoster() {
   let id = 0;
+  const columns = sample.map(([width, rows]) => ({
+    width: width / 1080,
+    cells: rows.map(([bottom, role, text = '', slot]) => ({ id: `cell-${++id}`, bottom: bottom / 1350, role, text, slot })),
+  }));
+  const oplas = sampleOplas.map(({ blocks, ...options }, index) => updatePosterOpla({
+    id: `opla-${index + 1}`,
+    cellIds: blocks.map(([column, row]) => columns[column].cells[row].id),
+  }, { layer: 'under', ...options }));
   return {
     preset: 'portrait', mode: 'digital', width: 1080, height: 1350, scheme: 2, copy: 'MAKE YOUR MOVE', textSeed: 0,
-    columns: sample.map(([width, rows]) => ({
-      width: width / 1080,
-      cells: rows.map(([bottom, role, text = '', slot]) => ({ id: `cell-${++id}`, bottom: bottom / 1350, role, text, slot })),
-    })),
+    columns, oplas,
   };
 }
 
