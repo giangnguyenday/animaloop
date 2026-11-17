@@ -50,6 +50,7 @@
               <svg id="poster-ruler-x" class="poster-ruler" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden></svg>
               <svg id="poster-ruler-y" class="poster-ruler" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden></svg>
               <svg id="stage" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1350" role="group" aria-label="Poster artboard" tabindex="0"></svg>
+              <svg id="poster-opla-transform" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
               <input id="poster-cell-editor" type="text" aria-label="Edit block letter" autocomplete="off" autocapitalize="off" spellcheck="false" tabindex="-1" hidden>
             </div>
           </div>
@@ -64,8 +65,7 @@
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.3"/><path d="M5.75 5.75 8 8l2.25-2.25m-4.5 4.5L8 8l2.25 2.25"/></svg>
             </button>
             <button type="button" class="button frame-button" id="poster-swap-colors" aria-label="Swap colors" title="Swap colors" disabled>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.5 5h11m-3-3 3 3-3 3M13.5 11h-11m3-3-3 3 3 3"/></svg>
-              <span id="poster-swap-preview" aria-hidden="true" hidden></span>
+              <span id="poster-swap-preview" aria-hidden="true"></span>
             </button>
             <button type="button" class="button frame-button" id="undo-scene" aria-label="Undo" title="Undo" disabled>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5.5 3 2 6.5 5.5 10M2 6.5h8a4 4 0 0 1 4 4v2.25"/></svg>
@@ -125,7 +125,7 @@
         </div>
         <div class="control-section">
           <div class="section-title"><h2>Colors</h2></div>
-          <label class="field poster-scheme-field">Color scheme
+          <label class="field">Color scheme
             <select id="poster-scheme"></select>
             <span id="poster-scheme-preview" class="poster-scheme-preview" aria-hidden="true">
               <span class="poster-scheme-accent-a"></span><span class="poster-scheme-accent-b"></span>
@@ -135,14 +135,18 @@
           </label>
         </div>
         <div class="control-section">
-          <label class="field">Reset to
-            <select id="poster-reset-style">
-              <option value="example" selected>Example design</option>
-              <option value="accentA">Solid first accent</option>
-              <option value="accentB">Solid second accent</option>
-            </select>
-          </label>
-          <button type="button" class="button wide" id="poster-reset-design">Reset design</button>
+          <div class="section-title"><h2 id="poster-reset-heading">Reset</h2></div>
+          <div class="poster-reset-options" role="group" aria-labelledby="poster-reset-heading">
+            <button type="button" class="button" id="poster-reset-accent-a" data-poster-reset="accentA" aria-label="Empty poster, first accent">
+              <span class="poster-reset-swatch poster-scheme-accent-a" aria-hidden="true"></span>
+              Empty poster
+            </button>
+            <button type="button" class="button" id="poster-reset-accent-b" data-poster-reset="accentB" aria-label="Empty poster, second accent">
+              <span class="poster-reset-swatch poster-scheme-accent-b" aria-hidden="true"></span>
+              Empty poster
+            </button>
+            <button type="button" class="button" id="poster-reset-design" data-poster-reset="example">Example poster</button>
+          </div>
         </div>
       </section>
 
@@ -246,8 +250,9 @@
           </div>
           <label class="field">
             <span class="value-row">Size <output id="poster-opla-size-value" for="poster-opla-size">100%</output></span>
-            <input type="range" id="poster-opla-size" min="25" max="250" step="1" value="100">
+            <input type="range" id="poster-opla-size" min="25" max="200" step="1" value="100" aria-describedby="poster-opla-size-note">
           </label>
+          <p class="control-note" id="poster-opla-size-note">Drag the artwork to move it, a corner to resize it, or the top handle to rotate it.</p>
           <div class="position-fields">
             <label class="field">
               <span class="value-row">X offset <output id="poster-opla-x-value" for="poster-opla-x">0%</output></span>
@@ -258,6 +263,19 @@
               <input type="range" id="poster-opla-y" min="-100" max="100" step="1" value="0">
             </label>
           </div>
+          <label class="field">Rotation (°) <input type="number" id="poster-opla-rotation" step="1" value="0"></label>
+          <details class="shortcut-hint">
+            <summary>Keyboard shortcuts</summary>
+            <dl>
+              <div><dt>Nudge 1 px</dt><dd><kbd>Arrow keys</kbd></dd></div>
+              <div><dt>Nudge 10 px</dt><dd><kbd>Shift</kbd> + <kbd>Arrow keys</kbd></dd></div>
+              <div><dt>Copy / Paste / Duplicate</dt><dd><kbd>Cmd / Ctrl</kbd> + <kbd>C / V / D</kbd></dd></div>
+              <div><dt>Duplicate and move</dt><dd><kbd>Option / Alt</kbd> + drag</dd></div>
+              <div><dt>Snap rotation to 15°</dt><dd><kbd>Shift</kbd> + drag rotation handle</dd></div>
+              <div><dt>Remove</dt><dd><kbd>Delete</kbd></dd></div>
+              <div><dt>Undo</dt><dd><kbd>Cmd / Ctrl</kbd> + <kbd>Z</kbd></dd></div>
+            </dl>
+          </details>
         </div>
         <div class="control-section">
           <div class="section-title"><h2>Movement</h2></div>

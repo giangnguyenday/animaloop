@@ -1,10 +1,13 @@
 import { SVG_NS, RIG_WIDTH, RIG_HEIGHT, loadRig } from './rig.js';
 import { cycles, poses, walkAt } from './motion.js';
+import { readFrame } from './opla-frame.js';
 
 const maxOplas = 3;
+export const minPosterOplaSize = .25;
+export const maxPosterOplaSize = 2;
 const defaultOpla = {
   count: 1, fit: 'fit', layer: 'over', mode: 'pose', pose: 'neutral', cycle: 'stroll',
-  scale: 'same', x: 0, y: 0, size: 1,
+  scale: 'same', x: 0, y: 0, size: 1, rotation: 0,
 };
 const fits = ['fit', 'bleed', 'crop'];
 const layers = ['under', 'over'];
@@ -80,9 +83,16 @@ export function createPosterOpla(placements, cells, ids) {
   return { id: `opla-${next}`, cellIds: cellsForIds(cells, ids).map(({ id }) => id), ...defaultOpla };
 }
 
+export function duplicatePosterOpla(placements, cells, source, ids = source.cellIds) {
+  if (posterOplaCapacity(placements, cells, ids) < source.count) return null;
+  const placement = createPosterOpla(placements, cells, ids);
+  return placement ? updatePosterOpla(placement, source) : null;
+}
+
 export function updatePosterOpla(placement, patch, maxCount = maxOplas) {
   const value = { ...defaultOpla, ...placement, ...patch };
   const countLimit = bounded(maxCount, 1, maxOplas, maxOplas);
+  const rotation = Number.isFinite(value.rotation) ? ((value.rotation % 360) + 360) % 360 : defaultOpla.rotation;
   const next = {
     id: placement.id,
     cellIds: placement.cellIds,
@@ -91,11 +101,14 @@ export function updatePosterOpla(placement, patch, maxCount = maxOplas) {
     layer: layers.includes(value.layer) ? value.layer : defaultOpla.layer,
     mode: modes.includes(value.mode) ? value.mode : defaultOpla.mode,
     pose: Object.hasOwn(poses, value.pose) ? value.pose : defaultOpla.pose,
+    frame: Object.hasOwn(patch, 'frame') ? readFrame(value.frame) : placement.frame,
+    flip: value.flip === true,
     cycle: Object.hasOwn(cycles, value.cycle) ? value.cycle : defaultOpla.cycle,
     scale: scales.includes(value.scale) ? value.scale : defaultOpla.scale,
     x: bounded(value.x, -1, 1, 0),
     y: bounded(value.y, -1, 1, 0),
-    size: bounded(value.size, .25, 2.5, 1),
+    size: bounded(value.size, minPosterOplaSize, maxPosterOplaSize, 1),
+    rotation,
   };
   return Object.keys(next).every((key) => next[key] === placement[key]) ? placement : next;
 }
@@ -142,7 +155,8 @@ function intersect(first, second) {
 }
 
 function measureBounds(rig, placement) {
-  const key = placement.mode === 'animate' ? `cycle:${placement.cycle}` : `pose:${placement.pose}`;
+  const { mode, cycle, pose, frame, flip } = placement;
+  const key = mode === 'animate' ? `cycle:${cycle}` : JSON.stringify(['pose', frame ?? pose, flip]);
   if (!boundsCache.has(rig)) boundsCache.set(rig, new Map());
   const cache = boundsCache.get(rig);
   if (cache.has(key)) return cache.get(key);
@@ -155,14 +169,15 @@ function measureBounds(rig, placement) {
   probe.append(rig.defs.cloneNode(true), character.node);
   document.body.append(probe);
   try {
-    const { mode, cycle, pose } = placement;
     const samples = mode === 'animate'
       ? Array.from({ length: 16 }, (_, index) => walkAt(0, cycle, index / 16, RIG_WIDTH, 1, false).pose)
-      : [poses[pose]];
-    const measurements = samples.flatMap((frame) => {
-      character.update({ pose: frame });
+      : [frame ?? poses[pose]];
+    const measurements = samples.flatMap((sample) => {
+      character.update({ pose: sample });
       const rect = character.node.getBBox();
-      return rect.width > 0 && rect.height > 0 ? [rect] : [];
+      if (rect.width <= 0 || rect.height <= 0) return [];
+      if (mode !== 'pose' || !flip) return [rect];
+      return [{ x: RIG_WIDTH - rect.x - rect.width, y: rect.y, width: rect.width, height: rect.height }];
     });
     const bounds = measurements.length ? unionBounds(measurements) : fallback;
     cache.set(key, bounds);
@@ -172,51 +187,71 @@ function measureBounds(rig, placement) {
   }
 }
 
-function largestRect(rectangles) {
-  return rectangles.reduce((largest, rect) => (
-    rect.width * rect.height > largest.width * largest.height ? rect : largest
-  ));
+function fitRatio(rect, shape) {
+  return Math.min(rect.width / shape.width, rect.height / shape.height);
 }
 
-function distribute(rectangles, frame, count, shape, fit) {
+function slotCenter(slot, rectangles, shape, fit) {
+  const x = slot.x + slot.width / 2;
+  const y = slot.y + slot.height / 2;
+  const centerIsCovered = rectangles.some((rect) => (
+    x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
+  ));
+  if (fit === 'crop' || centerIsCovered) return { x, y };
+
+  // Keep a character visible when a slot lands in an unselected part of the combined frame.
+  const parts = rectangles.map((rect) => intersect(rect, slot)).filter(({ width, height }) => width > 0 && height > 0);
+  const best = (parts.length ? parts : rectangles).reduce((best, rect) => (
+    fitRatio(rect, shape) > fitRatio(best, shape) ? rect : best
+  ));
+  return { x: best.x + best.width / 2, y: best.y + best.height / 2 };
+}
+
+function distribute(frame, count, shape) {
   const horizontal = frame.width / shape.width >= frame.height / shape.height;
-  const occupiedArea = rectangles.reduce((area, rect) => area + rect.width * rect.height, 0);
-  const frameArea = frame.width * frame.height;
-  const rectangular = Math.abs(occupiedArea - frameArea) < frameArea * 1e-8;
   const width = horizontal ? frame.width / count : frame.width;
   const height = horizontal ? frame.height : frame.height / count;
-  return Array.from({ length: count }, (_, index) => {
-    const slot = { x: frame.x + (horizontal ? index * width : 0), y: frame.y + (horizontal ? 0 : index * height), width, height };
-    if (rectangular || fit === 'crop') return slot;
-    // Keep each Opla on the selected color blocks even when the frame bends around a letter.
-    const part = largestRect(rectangles.map((rect) => intersect(rect, slot)));
-    return part.width > 0 && part.height > 0 ? part : largestRect(rectangles);
-  });
+  return Array.from({ length: count }, (_, index) => ({
+    x: frame.x + (horizontal ? index * width : 0), y: frame.y + (horizontal ? 0 : index * height), width, height,
+  }));
 }
 
 function placeCharacters(rig, cellRects, placement, parent) {
   const frame = unionBounds(cellRects);
   const shape = measureBounds(rig, placement);
-  const slots = distribute(cellRects, frame, placement.count, shape, placement.fit);
-  const baseScale = Math.min(...slots.map((slot) => {
-    const fitX = slot.width / shape.width;
-    const fitY = slot.height / shape.height;
-    if (placement.fit === 'crop') return Math.max(fitX, fitY) * 1.08;
-    return Math.min(fitX, fitY) * (placement.fit === 'bleed' ? 1.20 : .94);
-  })) * placement.size;
-  return slots.map((slot, index) => {
-    const character = rig.create();
-    parent.append(character.node);
+  const slots = distribute(frame, placement.count, shape);
+  const [slot] = slots;
+  const baseScale = placement.fit === 'crop' ? Math.max(slot.width / shape.width, slot.height / shape.height) * 1.08
+    : fitRatio(slot, shape) * (placement.fit === 'bleed' ? 1.20 : .94);
+  const positions = slots.map((slot, index) => {
     const progress = slots.length > 1 ? index / (slots.length - 1) : 0;
     const progression = placement.scale === 'smaller' ? 1 - progress * .52
       : placement.scale === 'larger' && slots.length > 1 ? .48 + progress * .52 : 1;
-    const scale = baseScale * progression;
-    const x = slot.x + slot.width / 2 + placement.x * frame.width / 2
-      + (RIG_WIDTH / 2 - shape.x - shape.width / 2) * scale;
-    const y = slot.y + slot.height / 2 + placement.y * frame.height / 2
-      + (RIG_HEIGHT / 2 - shape.y - shape.height / 2) * scale;
+    return { ...slotCenter(slot, cellRects, shape, placement.fit), scale: baseScale * progression };
+  });
+  const fitted = unionBounds(positions.map(({ x, y, scale }) => ({
+    x: x - shape.width * scale / 2, y: y - shape.height * scale / 2,
+    width: shape.width * scale, height: shape.height * scale,
+  })));
+  const pivotX = fitted.x + fitted.width / 2;
+  const pivotY = fitted.y + fitted.height / 2;
+  const centerX = pivotX + placement.x * frame.width / 2;
+  const centerY = pivotY + placement.y * frame.height / 2;
+  const bounds = {
+    x: centerX - fitted.width * placement.size / 2,
+    y: centerY - fitted.height * placement.size / 2,
+    width: fitted.width * placement.size,
+    height: fitted.height * placement.size,
+  };
+  const characters = positions.map((position, index) => {
+    const character = rig.create();
+    parent.append(character.node);
+    const scale = position.scale * placement.size;
+    const x = centerX + (position.x - pivotX) * placement.size + (RIG_WIDTH / 2 - shape.x - shape.width / 2) * scale;
+    const y = centerY + (position.y - pivotY) * placement.size + (RIG_HEIGHT / 2 - shape.y - shape.height / 2) * scale;
     return { character, scale, x, y, phase: index / slots.length };
   });
+  return { frame, bounds, characters };
 }
 
 export function createPosterOplaLayers(rig, cells, placements, color) {
@@ -225,6 +260,7 @@ export function createPosterOplaLayers(rig, cells, placements, color) {
   const under = svg('g', { 'pointer-events': 'none', 'aria-hidden': 'true' });
   const over = svg('g', { 'pointer-events': 'none', 'aria-hidden': 'true' });
   const animated = [];
+  const placementGeometry = new Map();
   for (const placement of placements) {
     const rectangles = cellsForIds(cells, placement.cellIds);
     if (!rectangles.length) continue;
@@ -238,12 +274,19 @@ export function createPosterOplaLayers(rig, cells, placements, color) {
     }
     (placement.layer === 'under' ? under : over).append(group);
 
-    for (const { character, scale, x, y, phase } of placeCharacters(rig, rectangles, placement, group)) {
+    const artwork = svg('g');
+    group.append(artwork);
+    const { frame, bounds, characters } = placeCharacters(rig, rectangles, placement, artwork);
+    const pivotX = bounds.x + bounds.width / 2;
+    const pivotY = bounds.y + bounds.height / 2;
+    artwork.setAttribute('transform', `rotate(${placement.rotation ?? 0} ${pivotX} ${pivotY})`);
+    placementGeometry.set(placement.id, { frame, bounds });
+    for (const { character, scale, x, y, phase } of characters) {
       const appearance = { color, scale, x, y };
       if (placement.mode === 'animate') {
         animated.push({ character, appearance, cycle: placement.cycle, phase });
       } else {
-        character.update({ ...appearance, pose: poses[placement.pose] });
+        character.update({ ...appearance, pose: placement.frame ?? poses[placement.pose], flip: placement.flip });
       }
     }
   }
@@ -256,7 +299,7 @@ export function createPosterOplaLayers(rig, cells, placements, color) {
     }
   }
   update(0);
-  return { defs, under, over, animated: animated.length > 0, update };
+  return { defs, under, over, animated: animated.length > 0, update, placementGeometry };
 }
 
 export function mountPosterOplaLayers(stage, layers) {

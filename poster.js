@@ -10,11 +10,12 @@ import { download, setPngDensity, svgToPng } from './image-export.js';
 import { cycles, cycleLabels, poseLabels } from './motion.js';
 import {
   loadPosterOplaRig, readPosterOplas, createPosterOpla, updatePosterOpla, posterOplaCapacity,
-  createPosterOplaLayers, mountPosterOplaLayers,
+  createPosterOplaLayers, mountPosterOplaLayers, duplicatePosterOpla, minPosterOplaSize, maxPosterOplaSize,
 } from './poster-opla.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
+const oplaTransform = $('poster-opla-transform');
 const svgNamespace = 'http://www.w3.org/2000/svg';
 const storageKey = 'animaloop-poster-v1';
 const viewKey = 'animaloop-poster-view-v1';
@@ -23,6 +24,10 @@ const undo = [];
 const redo = [];
 const selectedIds = new Set();
 const swappedAccents = { accentA: 'accentB', accentB: 'accentA' };
+const oplaCorners = { nw: [-1, -1], ne: [1, -1], se: [1, 1], sw: [-1, 1] };
+const arrowKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+const posterClipboardPrefix = 'ANIMALOOP Poster Opla: ';
+const oplaClipboardPrefix = 'ANIMALOOP Opla: ';
 const tabButtons = [...document.querySelectorAll('[data-poster-tab]')];
 const cellEditor = $('poster-cell-editor');
 const editorOptions = [
@@ -59,7 +64,7 @@ let oplaPlaying = false;
 let animationFrame = 0;
 let lastAnimationTime;
 const oplaDraft = {
-  count: 1, fit: 'fit', layer: 'over', size: 1, x: 0, y: 0,
+  count: 1, fit: 'fit', layer: 'over', size: 1, x: 0, y: 0, rotation: 0,
   mode: 'pose', pose: 'neutral', cycle: 'stroll', scale: 'same',
 };
 
@@ -104,6 +109,52 @@ function mountOplas(target, { cells, oplaColor }, placements, seconds) {
 
 function selectedOpla() {
   return (state.oplas ?? []).find(({ id }) => id === activeOplaId);
+}
+
+function selectOplaPlacement(id) {
+  activeOplaId = id;
+  const placement = selectedOpla();
+  if (placement) {
+    selectedIds.clear();
+    for (const cellId of placement.cellIds) selectedIds.add(cellId);
+  }
+  refresh();
+}
+
+function placementCenter({ x, y, width, height }) {
+  return { x: x + width / 2, y: y + height / 2 };
+}
+
+function renderOplaTransform() {
+  const geometry = activeTab === 'opla' && oplaPreview?.placementGeometry.get(activeOplaId);
+  oplaTransform.replaceChildren();
+  if (!geometry) return;
+  const { bounds } = geometry;
+  const center = placementCenter(bounds);
+  const rotation = selectedOpla().rotation;
+  const screen = stage.getScreenCTM();
+  if (!screen) return;
+  const unit = 1 / Math.hypot(screen.a, screen.b);
+  if (!Number.isFinite(unit)) return;
+  oplaTransform.setAttribute('viewBox', stage.getAttribute('viewBox'));
+  const handles = svg('g', { transform: `rotate(${rotation} ${center.x} ${center.y})` });
+  handles.append(svg('rect', { class: 'selection-box', ...bounds }));
+  for (const [corner, [horizontal, vertical]] of Object.entries(oplaCorners)) {
+    handles.append(svg('rect', {
+      class: 'scale-handle poster-opla-scale-handle',
+      'data-opla-corner': corner, 'data-corner': corner,
+      x: center.x + horizontal * bounds.width / 2 - 4 * unit,
+      y: center.y + vertical * bounds.height / 2 - 4 * unit,
+      width: 8 * unit,
+      height: 8 * unit,
+    }));
+  }
+  const handleY = bounds.y - 24 * unit;
+  handles.append(
+    svg('line', { class: 'rotation-stem', x1: center.x, y1: bounds.y, x2: center.x, y2: handleY }),
+    svg('circle', { class: 'rotation-handle', 'data-opla-rotation': '', cx: center.x, cy: handleY, r: 5 * unit }),
+  );
+  oplaTransform.append(handles);
 }
 
 function updateOplaTransport() {
@@ -164,7 +215,13 @@ function updateOplaControls(cells) {
   const counts = $('poster-opla-count');
   for (const option of counts.options) option.disabled = Number(option.value) > (capacity || 3);
   counts.value = Math.min(options.count, capacity || 3);
-  for (const key of ['fit', 'layer', 'mode', 'pose', 'cycle', 'scale']) $(`poster-opla-${key}`).value = options[key];
+  for (const key of ['fit', 'layer', 'mode', 'cycle', 'scale']) $(`poster-opla-${key}`).value = options[key];
+  const pose = $('poster-opla-pose');
+  const frameOption = pose.querySelector('option[value="__frame"]');
+  if (options.frame && !frameOption) pose.append(new Option('Copied pose', '__frame'));
+  else if (!options.frame) frameOption?.remove();
+  pose.value = options.frame ? '__frame' : options.pose;
+  $('poster-opla-rotation').value = Math.round(options.rotation) % 360;
   for (const key of ['size', 'x', 'y']) {
     const value = Math.round(100 * options[key]);
     $(`poster-opla-${key}`).value = value;
@@ -191,6 +248,25 @@ function changeOplaOptions(patch, source) {
   apply({ ...state, oplas: state.oplas.map((item) => item.id === placement.id ? updated : item) }, source);
 }
 
+function copyPosterPlacement(source, ids, offset = 20, editSource) {
+  const placements = state.oplas ?? [];
+  const cells = posterCells(state);
+  const duplicate = duplicatePosterOpla(placements, cells, source, ids);
+  if (!duplicate) {
+    notify('Select connected blocks with room for this placement.');
+    return;
+  }
+  const targets = cells.filter(({ id }) => duplicate.cellIds.includes(id));
+  const width = Math.max(...targets.map((cell) => cell.x + cell.width)) - Math.min(...targets.map((cell) => cell.x));
+  const height = Math.max(...targets.map((cell) => cell.y + cell.height)) - Math.min(...targets.map((cell) => cell.y));
+  const placed = updatePosterOpla(duplicate, { x: duplicate.x + 2 * offset / width, y: duplicate.y + 2 * offset / height });
+  activeOplaId = placed.id;
+  selectedIds.clear();
+  for (const id of placed.cellIds) selectedIds.add(id);
+  apply({ ...state, oplas: [...placements, placed] }, editSource);
+  return placed;
+}
+
 function cellEdges(cell) {
   const { column, row } = cell;
   const rightColumn = (cell.columnEnd ?? column) + 1;
@@ -213,7 +289,7 @@ function renderGuides(cells, selection) {
   for (const { x, y, width, height } of selection) {
     overlay.append(svg('rect', { class: 'poster-selection', x, y, width, height }));
   }
-  if (selection.length === 1) {
+  if (selection.length === 1 && activeTab !== 'opla') {
     const [cell] = selection;
     const { x, y, width, height } = cell;
     const right = x + width;
@@ -246,6 +322,7 @@ function renderGuides(cells, selection) {
 function renderPreview(poster, selection) {
   const hadFocus = document.activeElement === stage || stage.contains(document.activeElement);
   renderPoster(stage, poster);
+  stage.dataset.mode = activeTab;
   const { cells } = poster;
   if (!cells.some(({ id }) => id === focusedCellId)) focusedCellId = selection[0]?.id ?? cells[0]?.id;
   stage.tabIndex = cells.length ? -1 : 0;
@@ -259,6 +336,7 @@ function renderPreview(poster, selection) {
   oplaPreview = mountOplas(stage, poster, state.oplas, oplaTime);
   syncOplaPlayback();
   renderGuides(cells, selection);
+  renderOplaTransform();
   if (hadFocus && focusedCellId) focusStageCell(focusedCellId);
 }
 
@@ -436,7 +514,6 @@ function updateSwapButton(selection) {
   button.disabled = !first;
   button.title = label;
   button.setAttribute('aria-label', label);
-  swatch.hidden = !first;
   if (first) {
     swatch.style.setProperty('--swap-first', first);
     swatch.style.setProperty('--swap-second', second);
@@ -487,7 +564,7 @@ function selectBlock(id, extend = false) {
   else if (id) selectedIds.add(id);
   if (id) focusedCellId = id;
   if (activeTab === 'opla') {
-    const matches = (state.oplas ?? []).filter((item) => item.cellIds.some((cellId) => selectedIds.has(cellId)));
+    const matches = !extend && id ? (state.oplas ?? []).filter(({ cellIds }) => cellIds.includes(id)) : [];
     activeOplaId = matches.length === 1 ? matches[0].id : '';
   }
   refresh();
@@ -556,6 +633,7 @@ async function exportPoster(format) {
       outline: format !== 'text',
       embedFont: format === 'text',
       allowFallbackText: format === 'png',
+      crispBlocks: true,
       width: physical ? `${size.width}mm` : size.pixelWidth,
       height: physical ? `${size.height}mm` : size.pixelHeight,
     });
@@ -606,20 +684,22 @@ for (const [key, labels] of [['pose', poseLabels], ['cycle', cycleLabels]]) {
 }
 for (const key of ['count', 'fit', 'layer', 'mode', 'pose', 'cycle', 'scale']) {
   $(`poster-opla-${key}`).addEventListener('change', (event) => {
-    changeOplaOptions({ [key]: key === 'count' ? Number(event.target.value) : event.target.value });
+    const value = event.target.value;
+    if (value === '__frame') return;
+    const patch = { [key]: key === 'count' ? Number(value) : value };
+    if (key === 'pose') Object.assign(patch, { frame: undefined, flip: false });
+    changeOplaOptions(patch);
   });
 }
+$('poster-opla-rotation').addEventListener('change', (event) => {
+  if (Number.isFinite(event.target.valueAsNumber)) changeOplaOptions({ rotation: event.target.valueAsNumber });
+  updateOplaControls(posterCells(state));
+});
 for (const key of ['size', 'x', 'y']) {
   bindLiveInput(`poster-opla-${key}`, (input) => changeOplaOptions({ [key]: input.valueAsNumber / 100 }, input));
 }
 $('poster-opla-placement').addEventListener('change', (event) => {
-  activeOplaId = event.target.value;
-  const placement = selectedOpla();
-  if (placement) {
-    selectedIds.clear();
-    for (const id of placement.cellIds) selectedIds.add(id);
-  }
-  refresh();
+  selectOplaPlacement(event.target.value);
 });
 $('poster-opla-add').addEventListener('click', () => {
   const placements = state.oplas ?? [];
@@ -633,12 +713,13 @@ $('poster-opla-add').addEventListener('click', () => {
   if (created.mode === 'animate') oplaPlaying = true;
   apply({ ...state, oplas: [...placements, created] });
 });
-$('poster-opla-remove').addEventListener('click', () => {
+function removeSelectedOpla() {
   if (!selectedOpla()) return;
   const previous = activeOplaId;
   activeOplaId = '';
   apply({ ...state, oplas: state.oplas.filter(({ id }) => id !== previous) });
-});
+}
+$('poster-opla-remove').addEventListener('click', removeSelectedOpla);
 $('poster-opla-preview').addEventListener('click', () => {
   oplaPlaying = !oplaPlaying;
   syncOplaPlayback();
@@ -694,12 +775,89 @@ $('poster-swap-colors').addEventListener('click', () => {
   apply(poster);
 });
 
+function stagePoint(event) {
+  return new DOMPoint(event.clientX, event.clientY).matrixTransform(stage.getScreenCTM().inverse());
+}
+
+function dragOpla(event, point) {
+  const { type, start, original, frame, center } = drag;
+  if (type === 'opla-scale') {
+    const { x, y } = drag.cornerVector;
+    const movement = (point.x - start.x) * x + (point.y - start.y) * y;
+    const ratio = 1 + movement / (x * x + y * y);
+    const size = Math.min(maxPosterOplaSize, Math.max(minPosterOplaSize, original.size * ratio));
+    changeOplaOptions({ size }, stage);
+    return;
+  }
+  if (type === 'opla-rotate') {
+    const initialAngle = Math.atan2(start.y - center.y, start.x - center.x);
+    const angle = Math.atan2(point.y - center.y, point.x - center.x);
+    const rotation = original.rotation + (angle - initialAngle) * 180 / Math.PI;
+    changeOplaOptions({ rotation: event.shiftKey ? Math.round(rotation / 15) * 15 : rotation }, stage);
+    return;
+  }
+  if (!drag.moved) {
+    if (Math.hypot(point.x - start.x, point.y - start.y) < 2) return;
+    drag.moved = true;
+    if ((drag.duplicate || event.altKey) && !copyPosterPlacement(original, original.cellIds, 0, stage)) {
+      drag.cancelled = true;
+    }
+  }
+  if (!drag.cancelled) {
+    changeOplaOptions({
+      x: original.x + 2 * (point.x - start.x) / frame.width,
+      y: original.y + 2 * (point.y - start.y) / frame.height,
+    }, stage);
+  }
+}
+
+function startOplaDrag(event, type, corner) {
+  const original = selectedOpla();
+  const geometry = oplaPreview?.placementGeometry.get(activeOplaId);
+  if (!original || !geometry) return;
+  const { bounds, frame } = geometry;
+  const center = placementCenter(bounds);
+  const cornerVector = corner && new DOMPoint(
+    oplaCorners[corner][0] * bounds.width / 2, oplaCorners[corner][1] * bounds.height / 2,
+  ).matrixTransform(new DOMMatrix().rotate(original.rotation));
+  event.preventDefault();
+  finishEdit();
+  stage.focus({ preventScroll: true });
+  stage.setPointerCapture(event.pointerId);
+  drag = {
+    type, start: stagePoint(event), pointer: event.pointerId,
+    original, frame, center, cornerVector, duplicate: event.altKey,
+  };
+  stage.dataset.posterDragging = corner ? `opla-${corner}` : type;
+}
+
+oplaTransform.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || drag) return;
+  const corner = event.target.dataset.oplaCorner;
+  if (corner) startOplaDrag(event, 'opla-scale', corner);
+  else if (event.target.hasAttribute('data-opla-rotation')) startOplaDrag(event, 'opla-rotate');
+});
+
 stage.addEventListener('pointerdown', (event) => {
   if (event.button !== 0 || drag) return;
   const type = event.target.closest('[data-poster-boundary]')?.dataset.posterBoundary;
   if (!type) {
-    const id = event.target.closest('[data-cell]')?.dataset.cell;
+    let id = event.target.closest('[data-cell]')?.dataset.cell;
     event.preventDefault();
+    const opla = activeTab === 'opla' && (event.target.closest('[data-poster-opla]')
+      ?? document.elementsFromPoint(event.clientX, event.clientY)
+        .map((element) => element.closest('[data-poster-opla]')).find(Boolean));
+    if (opla && !event.shiftKey) {
+      selectOplaPlacement(opla.dataset.posterOpla);
+      startOplaDrag(event, 'opla-move');
+      return;
+    }
+    if (opla && !id) {
+      const point = stagePoint(event);
+      id = posterCells(state).find(({ x, y, width, height }) => (
+        point.x >= x && point.x < x + width && point.y >= y && point.y < y + height
+      ))?.id;
+    }
     selectBlock(id, event.shiftKey);
     if (id && !event.shiftKey && activeTab !== 'opla') focusCellEditor();
     else if (id) focusStageCell(id);
@@ -707,7 +865,7 @@ stage.addEventListener('pointerdown', (event) => {
     return;
   }
   if (event.shiftKey) return;
-  const start = new DOMPoint(event.clientX, event.clientY).matrixTransform(stage.getScreenCTM().inverse());
+  const start = stagePoint(event);
   const cell = selectedCell();
   if (!cell) return;
   event.preventDefault();
@@ -719,7 +877,11 @@ stage.addEventListener('pointerdown', (event) => {
 stage.addEventListener('pointermove', (event) => {
   if (drag?.pointer !== event.pointerId) return;
   const { type, cell, start } = drag;
-  const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(stage.getScreenCTM().inverse());
+  const point = stagePoint(event);
+  if (type.startsWith('opla-')) {
+    dragOpla(event, point);
+    return;
+  }
   const size = dimensions(state);
   const position = type === 'column'
     ? (cell.x + cell.width + point.x - start.x) / size.viewWidth
@@ -784,7 +946,8 @@ function handleBlockKey(event) {
     }
     return;
   }
-  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+  if (arrowKeys.includes(event.key)) {
+    if (activeTab === 'opla' && selectedOpla()) return;
     event.preventDefault();
     const cells = posterCells(state);
     const cell = cells.find((item) => item.id === id);
@@ -875,7 +1038,9 @@ $('poster-reset').addEventListener('click', (event) => {
   event.target.closest('details').open = false;
   resetDesign('example');
 });
-$('poster-reset-design').addEventListener('click', () => resetDesign($('poster-reset-style').value));
+for (const button of document.querySelectorAll('[data-poster-reset]')) {
+  button.addEventListener('click', () => resetDesign(button.dataset.posterReset));
+}
 
 function showTab(active) {
   finishEdit();
@@ -903,15 +1068,74 @@ for (const [index, button] of tabButtons.entries()) {
     tabButtons[next].focus();
   });
 }
-document.addEventListener('keydown', (event) => {
-  const editingField = event.target !== cellEditor && event.target.closest('input, textarea, select, [contenteditable]');
-  if (editingField || event.altKey || !(event.metaKey || event.ctrlKey)) return;
-  const key = event.key.toLowerCase();
-  if (key !== 'z' && key !== 'y') return;
+const isEditingField = (event) => event.target.closest('input, textarea, select, [contenteditable]');
+document.addEventListener('copy', (event) => {
+  const placement = selectedOpla();
+  if (activeTab !== 'opla' || !placement || isEditingField(event) || drag || window.getSelection()?.toString()) return;
+  if (!event.clipboardData) return;
+  event.clipboardData.setData('text/plain', posterClipboardPrefix + JSON.stringify(placement));
   event.preventDefault();
-  if (event.shiftKey || key === 'y') restore(redo, undo);
-  else restore(undo, redo);
+  notify('Opla copied.');
 });
+document.addEventListener('paste', (event) => {
+  if (activeTab !== 'opla' || isEditingField(event) || drag) return;
+  const text = event.clipboardData?.getData('text/plain');
+  const prefix = [posterClipboardPrefix, oplaClipboardPrefix].find((start) => text?.startsWith(start));
+  if (!prefix) return;
+  let data;
+  try { data = JSON.parse(text.slice(prefix.length)); }
+  catch { return; }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+  event.preventDefault();
+  const fromOpla = prefix === oplaClipboardPrefix;
+  const ids = selectedIds.size ? [...selectedIds] : !fromOpla && Array.isArray(data.cellIds) ? data.cellIds : [];
+  if (!ids.length) {
+    notify('Select blocks before pasting an Opla.');
+    return;
+  }
+  const source = fromOpla ? {
+    count: 1, size: data.scale, pose: data.pose, frame: data.frame, flip: data.flip, rotation: data.rotation,
+  } : data;
+  const placement = updatePosterOpla({ cellIds: ids }, source);
+  const sameBlocks = Array.isArray(data.cellIds) && placement.cellIds.length === data.cellIds.length
+    && placement.cellIds.every((id) => data.cellIds.includes(id));
+  if (copyPosterPlacement(placement, ids, sameBlocks ? 20 : 0)) notify('Opla pasted.');
+});
+document.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented || (event.target !== cellEditor && isEditingField(event)) || event.altKey || drag) return;
+  const key = event.key.toLowerCase();
+  const command = event.metaKey || event.ctrlKey;
+  if (command && (key === 'z' || key === 'y')) {
+    event.preventDefault();
+    if (event.shiftKey || key === 'y') restore(redo, undo);
+    else restore(undo, redo);
+    return;
+  }
+  const placement = selectedOpla();
+  if (activeTab !== 'opla' || !placement) return;
+  if (command && key === 'd') {
+    event.preventDefault();
+    if (copyPosterPlacement(placement)) notify('Opla duplicated.');
+  } else if (!command && (key === 'delete' || key === 'backspace')) {
+    event.preventDefault();
+    removeSelectedOpla();
+  } else if (!command && arrowKeys.includes(event.key)) {
+    const geometry = oplaPreview?.placementGeometry.get(placement.id);
+    if (!geometry) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 10 : 1;
+    const horizontal = Number(key === 'arrowright') - Number(key === 'arrowleft');
+    const vertical = Number(key === 'arrowdown') - Number(key === 'arrowup');
+    changeOplaOptions({
+      x: placement.x + 2 * step * horizontal / geometry.frame.width,
+      y: placement.y + 2 * step * vertical / geometry.frame.height,
+    }, oplaTransform);
+  }
+});
+document.addEventListener('keyup', (event) => {
+  if (arrowKeys.includes(event.key)) finishEdit(oplaTransform);
+});
+window.addEventListener('blur', () => finishEdit(oplaTransform));
 document.addEventListener('click', (event) => {
   for (const menu of document.querySelectorAll('.action-menu[open]')) {
     if (!menu.contains(event.target)) menu.open = false;
@@ -923,7 +1147,10 @@ for (const [format, button] of Object.entries(exportButtons)) {
   button.disabled = true;
   button.addEventListener('click', () => exportPoster(format));
 }
-new ResizeObserver(() => renderRulers()).observe($('stage-wrap'));
+new ResizeObserver(() => {
+  renderRulers();
+  renderOplaTransform();
+}).observe($('stage-wrap'));
 const oplaRigPromise = loadPosterOplaRig().then((rig) => {
   oplaRig = rig;
   refresh();

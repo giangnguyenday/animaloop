@@ -193,6 +193,7 @@ export function renderPoster(stage, layout, {
   outline = false,
   embedFont = false,
   allowFallbackText = false,
+  crispBlocks = false,
   width = layout.width,
   height = layout.height,
 } = {}) {
@@ -212,6 +213,8 @@ export function renderPoster(stage, layout, {
       width: cell.width,
       height: cell.height,
       fill: cell.color,
+      // Fractional shared edges can otherwise reveal the artboard between two antialiased fills.
+      ...(crispBlocks && { 'shape-rendering': 'crispEdges' }),
     }));
     if (cell.text?.trim()) {
       const letter = drawLetter(cell, layout.textColor, outline, allowFallbackText);

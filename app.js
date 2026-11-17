@@ -1,5 +1,6 @@
 import { loadRig, SVG_NS } from './rig.js';
 import { cycles, cycleLabels, poses, poseLabels, walkAt, walkDirectionLabels } from './motion.js';
+import { readFrame } from './opla-frame.js';
 import { applyRenderFilter, blendModes, copyCount, effectCopy, effectLabels, effectOptions, effectParameters, renderFilters } from './effects.js';
 import { createPhysics } from './physics.js';
 import { createCamera } from './camera.js';
@@ -57,12 +58,6 @@ let statusTimer;
 function validSize(value) {
   return typeof value === 'string' && /^\d{3,4}x\d{3,4}$/.test(value)
     && value.split('x').every((part) => +part >= 128 && +part <= 4096);
-}
-
-const poseKeys = ['head','hat','body','leftArm','rightArm','leftLeg','rightLeg','bob','lean','leftLift','rightLift','footDirection'];
-function readFrame(frame) {
-  if (!frame || typeof frame !== 'object') return undefined;
-  return Object.fromEntries(poseKeys.filter((key) => Number.isFinite(frame[key])).map((key) => [key, clamp(frame[key], -360, 360)]));
 }
 
 function readProject(data) {

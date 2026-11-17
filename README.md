@@ -24,11 +24,13 @@ Open [Cook Your Opla](http://localhost:8765/opla.html) or [Fry Your Poster](http
 
 ## Make a poster
 
-Set the size and palette in **Artboard**. **Reset design** can restore the example or start a blank, aligned grid in either accent color. Use **Layout** to add columns and randomize the grid with or without keeping the column count. Drag a selected block’s edges to resize the grid. Shift-click to select more blocks. The artboard footer splits a block, merges blocks that form a rectangle, and swaps the accents of selected color blocks.
+Set the size and palette in **Artboard**. Under **Reset**, choose **Empty poster** to start a blank, aligned grid in either accent color, or choose **Example poster** to restore the example. Use **Layout** to add columns and randomize the grid with or without keeping the column count. Drag a selected block’s edges to resize the grid. Shift-click to select more blocks. The artboard footer splits a block, merges blocks that form a rectangle, and swaps the accents of selected color blocks.
 
 Click a block and type to replace its letter. Press Delete or Backspace to restore its accent color. In **Type**, enter copy or reshuffle the words across the grid. Enable **Jumble grid** to randomize the layout at the same time. Spaces can move the next word to a different row.
 
-In **Add Opla**, select one block or Shift-click connected blocks, then place up to three Oplas per block. Choose a still pose or a movement cycle, adjust the fit and layer, and vary the sizes across a sequence. Pause or scrub the preview to choose a frame. **Settings** controls the rulers, grid lines, workspace dots, and reading order. PNG and SVG exports capture the current frame. Print PNGs use 300 ppi, and print SVGs use millimetres. The browser remembers the poster between visits.
+In **Add Opla**, select one block or Shift-click connected blocks, then place up to three Oplas per block. Drag the artwork to move it, pull a corner to resize it proportionally up to 200%, or use the top handle to rotate it. Use the keyboard shortcuts from **Place** to nudge, copy, paste, duplicate, or remove. To paste an Opla from **Cook Your Opla**, select its destination blocks first.
+
+Choose a still pose or a movement cycle, adjust the fit and layer, and vary the sizes across a sequence. Pause or scrub the preview to choose a frame. **Settings** controls the rulers, grid lines, workspace dots, and reading order. PNG and SVG exports capture the current frame. Print PNGs use 300 ppi, and print SVGs use millimetres. The browser remembers the poster between visits.
 
 ## Swap assets
 
