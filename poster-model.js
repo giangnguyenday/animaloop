@@ -24,9 +24,10 @@ export const maxColumns = 12;
 export const maxCellsPerColumn = 24;
 export const sizeLimits = { digital: { min: 64, max: 8192 }, print: { min: 10, max: 650 } };
 export const printPpi = 300;
-export const maxTextPadding = 50;
 const maxBarPercent = 45;
-const defaultTextPadding = 1;
+const autoTextPaddingFraction = .02;
+const legacyDefaultTextPadding = 1;
+const defaultIWidthCompensation = 100;
 const defaultBar = { enabled: false, height: 8, mode: 'add' };
 const barModes = ['add', 'overlap', 'push'];
 const minColumnWidth = .035;
@@ -97,7 +98,7 @@ export function createPoster() {
   }, { layer: 'under', ...options }));
   return {
     preset: 'portrait', mode: 'digital', width: 1080, height: 1350, scheme: 2, copy: 'MAKE YOUR MOVE', textSeed: 0,
-    columns, oplas, textPadding: defaultTextPadding, bars: readPosterBars(),
+    columns, oplas, textPaddingPx: null, iWidthCompensation: defaultIWidthCompensation, bars: readPosterBars(),
   };
 }
 
@@ -684,10 +685,39 @@ export function setPosterSize(state, width, height) {
   return { ...state, preset: `${state.mode}-custom`, width: sizeValue(width, state.mode), height: sizeValue(height, state.mode) };
 }
 
+export function maxPosterTextPadding(viewWidth) {
+  return Math.floor(viewWidth / 2);
+}
+
+export function posterTextPaddingPixels(state, viewWidth = dimensions(state).viewWidth) {
+  if (state.textPaddingPx == null) return Math.round(viewWidth * autoTextPaddingFraction);
+  return Math.min(state.textPaddingPx, maxPosterTextPadding(viewWidth));
+}
+
 export function setPosterTextPadding(state, value) {
+  if (value !== null && !Number.isFinite(value)) return state;
+  const textPaddingPx = value === null ? null : clamp(Math.round(value), 0, maxPosterTextPadding(dimensions(state).viewWidth));
+  return textPaddingPx === state.textPaddingPx ? state : { ...state, textPaddingPx };
+}
+
+function readPosterTextPadding(input, state) {
+  if (Object.hasOwn(input, 'textPaddingPx')) {
+    return Number.isFinite(input.textPaddingPx) ? Math.max(0, Math.round(input.textPaddingPx)) : null;
+  }
+  const { textPadding } = input;
+  if (!Number.isFinite(textPadding) || textPadding === legacyDefaultTextPadding) return null;
+  const { viewWidth } = dimensions(state);
+  return clamp(Math.round(viewWidth * textPadding / 100), 0, maxPosterTextPadding(viewWidth));
+}
+
+function readIWidthCompensation(value) {
+  return Number.isFinite(value) ? clamp(Math.round(value), 0, 100) : defaultIWidthCompensation;
+}
+
+export function setPosterIWidthCompensation(state, value) {
   if (!Number.isFinite(value)) return state;
-  const textPadding = clamp(value, 0, maxTextPadding);
-  return textPadding === state.textPadding ? state : { ...state, textPadding };
+  const iWidthCompensation = readIWidthCompensation(value);
+  return iWidthCompensation === state.iWidthCompensation ? state : { ...state, iWidthCompensation };
 }
 
 export function setPosterBar(state, edge, patch) {
@@ -732,8 +762,8 @@ export function readPoster(input, { strict = false } = {}) {
     width: sizeValue(Number.isFinite(input.width) ? input.width : presets[preset].width ?? (mode === 'print' ? 210 : 1080), mode),
     height: sizeValue(Number.isFinite(input.height) ? input.height : presets[preset].height ?? (mode === 'print' ? 297 : 1350), mode),
     scheme: input.scheme === 1 ? 1 : 2,
+    iWidthCompensation: readIWidthCompensation(input.iWidthCompensation),
     bars: readPosterBars(input.bars),
-    textPadding: Number.isFinite(input.textPadding) ? clamp(input.textPadding, 0, maxTextPadding) : defaultTextPadding,
     textSeed: Number.isSafeInteger(input.textSeed) ? input.textSeed >>> 0 : 0,
     columns: input.columns.map(({ width, cells }) => ({ width, cells: cells.map((cell) => {
       const text = posterCellLetter(cell.text);
@@ -745,6 +775,7 @@ export function readPoster(input, { strict = false } = {}) {
       };
     }) })),
   };
+  state.textPaddingPx = readPosterTextPadding(input, state);
   const spans = new Map();
   for (const cell of gridCells(state)) {
     if (!cell.join) {

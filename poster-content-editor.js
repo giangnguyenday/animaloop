@@ -1,7 +1,7 @@
 import {
   createPosterTextContent, importPosterContent, maxPosterContentData, maxPosterContentItems, maxPosterContentPadding,
   posterContentBounds, posterContentClipboard, posterContentDisplayText, readPosterContent, updatePosterContent,
-} from './poster-content.js?v=jumble';
+} from './poster-content.js?v=i-width';
 
 const corners = { nw: [-1, -1], ne: [1, -1], se: [1, 1], sw: [-1, 1] };
 const keyDirections = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };

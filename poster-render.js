@@ -207,12 +207,19 @@ function fallbackGlyph(letter, weight) {
   };
 }
 
-function drawLetter(cell, color, padding, outline, allowFallbackText) {
+function drawLetter(cell, color, padding, outline, allowFallbackText, iWidthCompensation = 0) {
   const letter = cell.text.normalize('NFC');
   // A very narrow block still needs room for a letter when the requested padding exceeds its width.
-  const targetWidth = Math.max(cell.width * .1, cell.width - 2 * padding);
+  let targetWidth = Math.max(cell.width * .1, cell.width - 2 * padding);
   const targetHeight = cell.height * .98;
   const weight = weightForAspectRatio(cell.width / cell.height);
+  if (letter === 'I' && iWidthCompensation > 0) {
+    const natural = glyphAtWidth(letter, 100, weight);
+    if (natural.supported && natural.height > 0) {
+      const naturalWidth = targetHeight * natural.width / natural.height;
+      targetWidth -= Math.max(0, targetWidth - naturalWidth) * iWidthCompensation / 100;
+    }
+  }
   const fit = fitLetter(letter, targetWidth / targetHeight, weight);
   const { supported } = fit;
   if (outline && !supported && !allowFallbackText) {
@@ -269,7 +276,7 @@ export function renderPoster(stage, layout, {
   stage.setAttribute('width', width);
   stage.setAttribute('height', height);
 
-  const padding = layout.width * (layout.textPadding ?? 1) / 100;
+  const padding = layout.textPaddingPx;
   const content = document.createDocumentFragment();
   if (embedFont && !outline) content.append(embeddedFont());
   content.append(svg('rect', { width: layout.width, height: layout.height, fill: layout.background }));
@@ -297,7 +304,7 @@ export function renderPoster(stage, layout, {
       ...(crispBlocks && { 'shape-rendering': 'crispEdges' }),
     }));
     if (cell.text?.trim()) {
-      const letter = drawLetter(cell, layout.textColor, padding, outline, allowFallbackText);
+      const letter = drawLetter(cell, layout.textColor, padding, outline, allowFallbackText, layout.iWidthCompensation);
       if (letter) group.append(letter);
     }
     content.append(group);

@@ -1,4 +1,4 @@
-import { isPosterFontLoaded, posterContentFontFamily, shapePosterContentLine } from './poster-render.js?v=poster-background';
+import { isPosterFontLoaded, posterContentFontFamily, shapePosterContentLine } from './poster-render.js?v=i-width';
 import { layoutJumble } from './poster-jumble.js';
 
 const svgNamespace = 'http://www.w3.org/2000/svg';

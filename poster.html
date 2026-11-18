@@ -6,7 +6,7 @@
   <meta name="description" content="Make an ANIMALOOP poster with a staggered grid and variable lettering.">
   <title>ANIMALOOP — Cook Your Poster</title>
   <link rel="stylesheet" href="./styles.css?v=grid-labels">
-  <link rel="stylesheet" href="./poster.css?v=box-color-order">
+  <link rel="stylesheet" href="./poster.css?v=i-width">
 </head>
 <body class="poster-editor">
   <header class="topbar">
@@ -265,9 +265,18 @@
             <textarea id="poster-text" rows="3" spellcheck="false" aria-describedby="poster-text-note"></textarea>
           </label>
           <p class="control-note" id="poster-text-note">Spaces give words room to move between rows.</p>
-          <label class="field">
-            <span class="value-row">Horizontal padding per side <span class="poster-size-unit">% of poster width</span></span>
-            <input type="number" id="poster-text-padding" min="0" step="any" value="1">
+          <div class="field">
+            <div class="value-row">
+              <label for="poster-text-padding">Horizontal padding per side (px)</label>
+              <label class="checkbox-field" title="2% of poster width, rounded to the nearest pixel">
+                <input type="checkbox" id="poster-text-padding-auto" aria-controls="poster-text-padding" checked> Auto
+              </label>
+            </div>
+            <input type="number" id="poster-text-padding" min="0" step="1" inputmode="numeric" readonly>
+          </div>
+          <label class="field" title="At 100%, uppercase I stays at its natural width in wide blocks.">
+            <span class="value-row">I width compensation <output id="poster-i-width-compensation-value" for="poster-i-width-compensation">100%</output></span>
+            <input type="range" id="poster-i-width-compensation" min="0" max="100" step="1" value="100">
           </label>
           <label class="checkbox-field"><input type="checkbox" id="poster-random-jumble-grid"> Jumble grid</label>
           <button type="button" class="button wide" id="poster-random-text" disabled>Randomize text position</button>
@@ -555,6 +564,6 @@
       </section>
     </aside>
   </main>
-  <script type="module" src="./poster.js?v=jumble"></script>
+  <script type="module" src="./poster.js?v=i-width"></script>
 </body>
 </html>

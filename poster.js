@@ -1,15 +1,16 @@
 import {
   createPoster, resetPosterGrid, readPoster, posterCells, posterText, setPosterText, graphemes,
   uppercasePosterText, posterCellLetter,
-  dimensions, presets, schemes, sizeLimits, printPpi, setPreset, setPosterSize, setPosterTextPadding, maxTextPadding,
+  dimensions, presets, schemes, sizeLimits, printPpi, setPreset, setPosterSize,
+  posterTextPaddingPixels, maxPosterTextPadding, setPosterTextPadding, setPosterIWidthCompensation,
   setPosterBar,
   maxColumns, setColumnCount, moveColumnBoundary, moveRowBoundary, canMoveRowBoundary, rowBoundarySnapTargets,
   splitCell, canSplitCell, mergeCells, canMergeCells, deleteCell, canDeleteCell, updateCell, setBlockRole, swapPosterBlocks,
   randomizeLayout, resetPosterLayout, randomizeTextPositions, clearTextBlocks,
-} from './poster-model.js?v=poster-background';
-import { loadPosterFont, renderPoster, renderPosterBars } from './poster-render.js?v=poster-background';
-import { importPosterContent, readPosterContent, renderPosterContent } from './poster-content.js?v=jumble';
-import { bindPosterContent } from './poster-content-editor.js?v=jumble';
+} from './poster-model.js?v=i-width';
+import { loadPosterFont, renderPoster, renderPosterBars } from './poster-render.js?v=i-width';
+import { importPosterContent, readPosterContent, renderPosterContent } from './poster-content.js?v=i-width';
+import { bindPosterContent } from './poster-content-editor.js?v=i-width';
 import { loadPalette } from './palette.js';
 import { loadPosterDraft, savePosterDraft } from './poster-storage.js';
 import { download, setPngDensity, svgToPng } from './image-export.js';
@@ -137,7 +138,8 @@ function layout(poster) {
     background: scheme.background,
     backgroundImage: poster.backgroundImage?.source,
     textColor: scheme.text,
-    textPadding: poster.textPadding,
+    textPaddingPx: posterTextPaddingPixels(poster, size.viewWidth),
+    iWidthCompensation: poster.iWidthCompensation,
     oplaColor: scheme.opla,
     cells: posterCells(poster).map((cell) => ({
       ...cell,
@@ -555,7 +557,12 @@ function refresh(source) {
 
   const text = posterText(state);
   if (source !== $('poster-text') && $('poster-text').value !== text) $('poster-text').value = text;
-  if (source !== $('poster-text-padding')) $('poster-text-padding').value = state.textPadding;
+  textPaddingAuto.checked = state.textPaddingPx === null;
+  textPaddingInput.readOnly = textPaddingAuto.checked;
+  textPaddingInput.max = maxPosterTextPadding(size.viewWidth);
+  if (source !== textPaddingInput) textPaddingInput.value = poster.textPaddingPx;
+  $('poster-i-width-compensation').value = state.iWidthCompensation;
+  $('poster-i-width-compensation-value').textContent = `${state.iWidthCompensation}%`;
   const letterCount = graphemes(text).length;
   const placed = cells.filter((cell) => cell.text).length;
   const capacity = cells.filter((cell) => cell.block !== 'color').length;
@@ -841,9 +848,17 @@ bindLiveInput('poster-text', (input) => {
   apply(next, input);
 });
 const textPaddingInput = $('poster-text-padding');
-textPaddingInput.max = maxTextPadding;
-bindLiveInput('poster-text-padding', (input) => apply(setPosterTextPadding(state, input.valueAsNumber), input));
-textPaddingInput.addEventListener('blur', () => { textPaddingInput.value = state.textPadding; });
+const textPaddingAuto = $('poster-text-padding-auto');
+textPaddingAuto.addEventListener('change', () => {
+  apply(setPosterTextPadding(state, textPaddingAuto.checked ? null : posterTextPaddingPixels(state)));
+});
+bindLiveInput('poster-text-padding', (input) => {
+  if (!input.readOnly) apply(setPosterTextPadding(state, input.valueAsNumber), input);
+});
+textPaddingInput.addEventListener('blur', () => { textPaddingInput.value = posterTextPaddingPixels(state); });
+bindLiveInput('poster-i-width-compensation', (input) => {
+  apply(setPosterIWidthCompensation(state, input.valueAsNumber), input);
+});
 bindLiveInput('poster-cell-text', (input) => {
   const cell = selectedCell();
   if (!cell) return;
