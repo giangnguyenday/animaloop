@@ -1,6 +1,7 @@
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const fontUrl = new URL('./src/fonts/google-sans-flex-poster-variable.ttf.gz', import.meta.url);
 const fontFamily = 'Google Sans Flex Poster';
+export const posterContentFontFamily = fontFamily;
 const fontSize = 1000;
 const minWidth = 25;
 const maxWidth = 151;
@@ -21,6 +22,7 @@ let font;
 let fontBytes;
 let harfBuzz;
 let shapingBuffer;
+let contentTextFeatures;
 let fontPromise;
 let embeddedFontStyle;
 let measureContext;
@@ -45,6 +47,7 @@ async function loadFont() {
   font = new shaper.Font(new shaper.Face(new shaper.Blob(bytes)));
   font.setScale(fontSize, fontSize);
   shapingBuffer = new shaper.Buffer();
+  contentTextFeatures = [new shaper.Feature('liga', 0), new shaper.Feature('clig', 0)];
   fontBytes = bytes;
 }
 
@@ -54,6 +57,10 @@ export function loadPosterFont() {
     throw error;
   });
   return fontPromise;
+}
+
+export function isPosterFontLoaded() {
+  return !!font;
 }
 
 function svg(tag, attributes) {
@@ -91,6 +98,38 @@ function setGlyphVariations(width, weight) {
     new harfBuzz.Variation('wdth', width),
     new harfBuzz.Variation('wght', weight),
   ]);
+}
+
+export function shapePosterContentLine(text, { width, weight, tracking, outline = false }) {
+  if (!text) return { advance: 0, supported: false, paths: [] };
+  let glyphs = [];
+  if (font) {
+    setGlyphVariations(width, weight);
+    shapingBuffer.reset();
+    shapingBuffer.addText(text);
+    shapingBuffer.guessSegmentProperties();
+    harfBuzz.shape(font, shapingBuffer, contentTextFeatures);
+    glyphs = shapingBuffer.getGlyphInfosAndPositions();
+  }
+  if (!glyphs.length || glyphs.some(({ codepoint }) => codepoint === 0)) {
+    measureContext ??= document.createElement('canvas').getContext('2d');
+    measureContext.font = `${weight} ${fontSize}px sans-serif`;
+    const advance = measureContext.measureText(text).width / fontSize;
+    return { advance: advance + Math.max(0, Array.from(text).length - 1) * tracking, supported: false, paths: [] };
+  }
+  let advance = 0;
+  let previousCluster;
+  const paths = [];
+  for (const { codepoint, cluster, xOffset, yOffset, xAdvance } of glyphs) {
+    if (previousCluster !== undefined && cluster !== previousCluster) advance += tracking * fontSize;
+    if (outline) {
+      const path = font.glyphToPath(codepoint);
+      if (path) paths.push({ path, x: (advance + xOffset) / fontSize, y: -yOffset / fontSize });
+    }
+    advance += xAdvance;
+    previousCluster = cluster;
+  }
+  return { advance: advance / fontSize, supported: true, paths, unitsPerEm: fontSize };
 }
 
 function glyphAtWidth(letter, width, weight) {
@@ -168,9 +207,10 @@ function fallbackGlyph(letter, weight) {
   };
 }
 
-function drawLetter(cell, color, outline, allowFallbackText) {
+function drawLetter(cell, color, padding, outline, allowFallbackText) {
   const letter = cell.text.normalize('NFC');
-  const targetWidth = cell.width * .94;
+  // A very narrow block still needs room for a letter when the requested padding exceeds its width.
+  const targetWidth = Math.max(cell.width * .1, cell.width - 2 * padding);
   const targetHeight = cell.height * .98;
   const weight = weightForAspectRatio(cell.width / cell.height);
   const fit = fitLetter(letter, targetWidth / targetHeight, weight);
@@ -229,9 +269,22 @@ export function renderPoster(stage, layout, {
   stage.setAttribute('width', width);
   stage.setAttribute('height', height);
 
+  const padding = layout.width * (layout.textPadding ?? 1) / 100;
   const content = document.createDocumentFragment();
   if (embedFont && !outline) content.append(embeddedFont());
   content.append(svg('rect', { width: layout.width, height: layout.height, fill: layout.background }));
+  if (layout.backgroundImage) {
+    content.append(svg('image', {
+      'data-poster-background-image': '',
+      'aria-hidden': 'true',
+      'pointer-events': 'none',
+      href: layout.backgroundImage,
+      width: layout.width,
+      height: layout.height,
+      overflow: 'hidden',
+      preserveAspectRatio: 'xMidYMid slice',
+    }));
+  }
   for (const cell of layout.cells) {
     const group = svg('g', { 'data-cell': cell.id });
     group.append(svg('rect', {
@@ -244,11 +297,27 @@ export function renderPoster(stage, layout, {
       ...(crispBlocks && { 'shape-rendering': 'crispEdges' }),
     }));
     if (cell.text?.trim()) {
-      const letter = drawLetter(cell, layout.textColor, outline, allowFallbackText);
+      const letter = drawLetter(cell, layout.textColor, padding, outline, allowFallbackText);
       if (letter) group.append(letter);
     }
     content.append(group);
   }
   stage.replaceChildren(content);
   return stage;
+}
+
+export function renderPosterBars(stage, { width, height, background, barHeights }, { crispBlocks = false } = {}) {
+  const { top, bottom } = barHeights;
+  if (!top && !bottom) return;
+  const bars = svg('g', { 'data-poster-bars': '', 'aria-hidden': 'true' });
+  const addBar = (y, height) => {
+    if (!height) return;
+    bars.append(svg('rect', {
+      y, width, height, fill: background,
+      ...(crispBlocks && { 'shape-rendering': 'crispEdges' }),
+    }));
+  };
+  addBar(0, top);
+  addBar(height - bottom, bottom);
+  stage.append(bars);
 }

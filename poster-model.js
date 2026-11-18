@@ -1,5 +1,5 @@
 import { flowPosterText, posterReadingOrder, segmentPosterText as segments } from './poster-flow.js';
-import { updatePosterOpla } from './poster-opla.js?v=opla-shuffle';
+import { updatePosterOpla } from './poster-opla.js?v=type-blocks';
 
 export const schemes = {
   1: { name: 'Zesty', accentA: '#A7F9FF', accentB: '#EAFF74', background: '#F5F5F5', text: '#423625', opla: '#3558E3' },
@@ -24,6 +24,11 @@ export const maxColumns = 12;
 export const maxCellsPerColumn = 24;
 export const sizeLimits = { digital: { min: 64, max: 8192 }, print: { min: 10, max: 650 } };
 export const printPpi = 300;
+export const maxTextPadding = 50;
+const maxBarPercent = 45;
+const defaultTextPadding = 1;
+const defaultBar = { enabled: false, height: 8, mode: 'add' };
+const barModes = ['add', 'overlap', 'push'];
 const minColumnWidth = .035;
 const minCellHeight = .012;
 const pixelsPerMillimeter = printPpi / 25.4;
@@ -31,8 +36,32 @@ const roles = ['background', 'accentA', 'accentB'];
 const accents = ['accentA', 'accentB'];
 const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
 
+function readPosterBar(bar) {
+  const measurement = Number.isFinite(bar?.heightPx)
+    ? { heightPx: Math.max(0, Math.round(bar.heightPx)) }
+    : { height: Number.isFinite(bar?.height) ? clamp(bar.height, 0, maxBarPercent) : defaultBar.height };
+  return {
+    enabled: bar?.enabled === true,
+    ...measurement,
+    mode: barModes.includes(bar?.mode) ? bar.mode : defaultBar.mode,
+  };
+}
+
+function readPosterBars(bars) {
+  return { top: readPosterBar(bars?.top), bottom: readPosterBar(bars?.bottom) };
+}
+
 export function graphemes(text) {
   return segments(text.normalize()).filter((segment) => !/^\s+$/u.test(segment));
+}
+
+export function uppercasePosterText(text) {
+  // Use the capital sharp S so it keeps its own block.
+  return text.replaceAll('ß', 'ẞ').toUpperCase().normalize();
+}
+
+export function posterCellLetter(text) {
+  return graphemes(uppercasePosterText(text))[0] ?? '';
 }
 
 // Cell edges in the supplied 1080 × 1350 reference. The slot order follows the headline.
@@ -68,7 +97,7 @@ export function createPoster() {
   }, { layer: 'under', ...options }));
   return {
     preset: 'portrait', mode: 'digital', width: 1080, height: 1350, scheme: 2, copy: 'MAKE YOUR MOVE', textSeed: 0,
-    columns, oplas,
+    columns, oplas, textPadding: defaultTextPadding, bars: readPosterBars(),
   };
 }
 
@@ -92,22 +121,52 @@ export function resetPosterGrid(state, accent) {
 
 export function dimensions(state) {
   const print = state.mode === 'print';
-  const { width, height } = state;
-  const pixelWidth = print ? Math.round(width * pixelsPerMillimeter) : width;
-  const pixelHeight = print ? Math.round(height * pixelsPerMillimeter) : height;
-  return { width, height, unit: print ? 'mm' : 'px', viewWidth: pixelWidth, viewHeight: pixelHeight, pixelWidth, pixelHeight };
+  const { width } = state;
+  const { top, bottom } = state.bars ?? readPosterBars();
+  const roundHeight = (height) => print ? Math.round(height * 100) / 100 : Math.round(height);
+  const toPixels = (value) => print ? Math.round(value * pixelsPerMillimeter) : value;
+  const originalPixels = toPixels(state.height);
+  const barHeightLimit = Math.round(originalPixels * maxBarPercent / 100);
+  const legacyHeight = (bar) => bar.enabled && bar.heightPx === undefined
+    ? roundHeight(state.height * bar.height / 100)
+    : 0;
+  const topLegacyHeight = legacyHeight(top);
+  const bottomLegacyHeight = legacyHeight(bottom);
+  const heightWithLegacyTop = roundHeight(state.height + (top.mode === 'add' ? topLegacyHeight : 0));
+  const totalLegacyHeight = roundHeight(heightWithLegacyTop + (bottom.mode === 'add' ? bottomLegacyHeight : 0));
+  const pixelsWithLegacyTop = toPixels(heightWithLegacyTop);
+  const totalLegacyPixels = toPixels(totalLegacyHeight);
+  const barPixels = (bar, fallback) => bar.enabled && bar.heightPx !== undefined
+    ? Math.min(bar.heightPx, barHeightLimit)
+    : fallback;
+  // Preserve the cumulative rounding used for older percentage-based bars in print projects.
+  const barHeights = {
+    top: barPixels(top, top.mode === 'add' ? pixelsWithLegacyTop - originalPixels : toPixels(topLegacyHeight)),
+    bottom: barPixels(bottom, bottom.mode === 'add' ? totalLegacyPixels - pixelsWithLegacyTop : toPixels(bottomLegacyHeight)),
+  };
+  const addedBarPixels = (bar, pixels) => bar.mode === 'add' && bar.heightPx !== undefined ? pixels : 0;
+  const addedPixels = addedBarPixels(top, barHeights.top) + addedBarPixels(bottom, barHeights.bottom);
+  const height = roundHeight(totalLegacyHeight + (print ? addedPixels / pixelsPerMillimeter : addedPixels));
+  const pixelWidth = toPixels(width);
+  const pixelHeight = totalLegacyPixels + addedPixels;
+  const gridY = top.mode === 'overlap' ? 0 : barHeights.top;
+  const gridHeight = pixelHeight - gridY - (bottom.mode === 'overlap' ? 0 : barHeights.bottom);
+  return {
+    width, height, unit: print ? 'mm' : 'px', viewWidth: pixelWidth, viewHeight: pixelHeight, pixelWidth, pixelHeight,
+    gridY, gridHeight, barHeights, barHeightLimit,
+  };
 }
 
 function gridCells(state) {
-  const { viewWidth, viewHeight } = dimensions(state);
+  const { viewWidth, gridY, gridHeight } = dimensions(state);
   let left = 0;
   return state.columns.flatMap(({ width, cells }, column) => {
     const x = left * viewWidth;
     left += width;
     let top = 0;
     return cells.map((cell, row) => {
-      const y = top * viewHeight;
-      const height = (cell.bottom - top) * viewHeight;
+      const y = gridY + top * gridHeight;
+      const height = (cell.bottom - top) * gridHeight;
       top = cell.bottom;
       return { ...cell, x, y, width: width * viewWidth, height, column, row };
     });
@@ -166,10 +225,12 @@ function placeCopy(state, text) {
 }
 
 export function setPosterText(state, text) {
-  return text === state.copy ? state : placeCopy(state, text);
+  const copy = uppercasePosterText(text);
+  return copy === state.copy ? state : placeCopy(state, copy);
 }
 
 export function randomizeTextPositions(state) {
+  if (state.oplas?.length) state = { ...state, oplas: [] };
   const hadOverrides = posterCells(state).some((cell) => cell.block);
   const next = hadOverrides ? mapCells(state, (cell) => ({ ...cell, block: undefined })) : state;
   if (!graphemes(next.copy).length) return next;
@@ -231,8 +292,26 @@ function editCellText(state, id, text) {
 export function updateCell(state, id, changes) {
   const cell = posterCells(state).find((item) => item.id === id);
   if (!cell) return state;
-  if (typeof changes.text === 'string') state = editCellText(state, id, graphemes(changes.text)[0] ?? '');
+  if (typeof changes.text === 'string') state = editCellText(state, id, posterCellLetter(changes.text));
   return changes.role ? setBlockRole(state, [id], changes.role) : state;
+}
+
+export function swapPosterBlocks(state, sourceId, targetId) {
+  if (sourceId === targetId) return state;
+  const cells = readingOrder(state);
+  const source = cells.find(({ id }) => id === sourceId);
+  const target = cells.find(({ id }) => id === targetId);
+  if (!source?.text || !target) return state;
+
+  const unslottedText = cells.some(({ text, slot }) => text && slot === undefined);
+  const slots = unslottedText ? new Map(cells.filter(({ text }) => text).map(({ id }, slot) => [id, slot])) : null;
+  return mapCells(state, (cell) => {
+    const content = cell.id === sourceId ? target : cell.id === targetId ? source : cell;
+    const slot = slots ? slots.get(content.id) : content.slot;
+    if (content === cell) return slot === cell.slot ? cell : { ...cell, slot };
+    const { text, role, block } = content;
+    return { ...cell, text, role, block, slot, accent: blockAccent(content) };
+  });
 }
 
 export function setBlockRole(state, ids, role) {
@@ -326,13 +405,13 @@ export function canMergeCells(state, ids) {
   return mergeSelection(state, ids).length > 0;
 }
 
-export function mergeCells(state, ids) {
+export function mergeCells(state, ids, contentId) {
   const selected = mergeSelection(state, ids);
   if (!selected.length) return state;
   const [anchor] = selected;
   const chosen = new Set(selected.map((cell) => cell.id));
   const filled = selected.filter((cell) => cell.text);
-  const content = filled[0] ?? anchor;
+  const content = selected.find((cell) => cell.id === contentId) ?? filled[0] ?? anchor;
   const columns = state.columns.map((column, index) => {
     const start = column.cells.findIndex((cell) => chosen.has(cell.join ?? cell.id));
     if (start < 0) return column;
@@ -346,6 +425,38 @@ export function mergeCells(state, ids) {
   });
   const next = { ...state, columns };
   return filled.length > 1 ? placeCopy(next, state.copy) : next;
+}
+
+function neighborForDeletion(state, id) {
+  const cells = posterCells(state);
+  const cell = cells.find((item) => item.id === id);
+  if (!cell) return;
+  const tolerance = Math.max(cell.width, cell.height) * 1e-8;
+  const equal = (first, second) => Math.abs(first - second) <= tolerance;
+  const vertical = cells.filter((item) => item.column === cell.column && item.columnEnd === cell.columnEnd);
+  return vertical.find((item) => equal(item.y, cell.y + cell.height))
+    ?? vertical.find((item) => equal(item.y + item.height, cell.y))
+    ?? cells.find((item) => (item.column === cell.columnEnd + 1 || item.columnEnd + 1 === cell.column)
+      && equal(item.y, cell.y) && equal(item.height, cell.height));
+}
+
+export function canDeleteCell(state, id) {
+  return !!neighborForDeletion(state, id);
+}
+
+export function deleteCell(state, id) {
+  const neighbor = neighborForDeletion(state, id);
+  if (!neighbor) return state;
+  const cleared = editCellText(state, id, '');
+  const next = mergeCells(cleared, [id, neighbor.id], neighbor.id);
+  if (next === cleared) return state;
+  if (!state.oplas?.length) return next;
+  const retainedId = posterCells(next).find((cell) => cell.id === id || cell.id === neighbor.id).id;
+  const oplas = state.oplas.map((opla) => ({
+    ...opla,
+    cellIds: opla.cellIds.filter((cellId) => cellId !== id).map((cellId) => cellId === neighbor.id ? retainedId : cellId),
+  })).filter(({ cellIds }) => cellIds.length);
+  return { ...next, oplas };
 }
 
 export function setColumnCount(state, requested) {
@@ -439,6 +550,15 @@ export function canMoveRowBoundary(state, column, row) {
   return max - min > 1e-8;
 }
 
+export function rowBoundarySnapTargets(state, column, row) {
+  const edges = rowBoundaryGroup(state, column, row);
+  if (!edges.length) return [];
+  const { min, max } = rowBoundaryRange(state, edges);
+  const movingColumns = new Set(edges.map(([index]) => index));
+  return state.columns.flatMap(({ cells }, index) => movingColumns.has(index)
+    ? [] : cells.map(({ bottom }) => bottom).filter((bottom) => bottom >= min && bottom <= max));
+}
+
 function replaceBoundaries(state, edges, bottom) {
   const rows = new Map(edges);
   return { ...state, columns: state.columns.map((column, index) => {
@@ -474,7 +594,21 @@ function varyColumnCount(state, random) {
   return canAdd ? setColumnCount(state, count + 1) : state;
 }
 
-export function randomizeLayout(state, random = Math.random, { keepColumns = true } = {}) {
+function shuffleLayoutColors(state, random) {
+  const colorCells = posterCells(state).filter((cell) => !cell.text);
+  if (!colorCells.length) return state;
+  const colors = new Map(colorCells.map(({ id }) => [id, accents[Math.floor(random() * accents.length)]]));
+  if (colorCells.length > 1 && new Set(colors.values()).size === 1) {
+    const { id } = colorCells[Math.floor(random() * colorCells.length)];
+    colors.set(id, colors.get(id) === 'accentA' ? 'accentB' : 'accentA');
+  }
+  return mapCells(state, (cell) => {
+    const color = colors.get(cell.join ?? cell.id);
+    return color ? { ...cell, role: color, accent: color } : cell;
+  });
+}
+
+export function randomizeLayout(state, random = Math.random, { keepColumns = true, shuffleColors = false } = {}) {
   const grid = keepColumns ? state : varyColumnCount(state, random);
   const weights = grid.columns.map(() => .7 + random() * 1.4);
   const total = weights.reduce((sum, weight) => sum + weight, 0);
@@ -492,7 +626,41 @@ export function randomizeLayout(state, random = Math.random, { keepColumns = tru
       if (max - min > 1e-8) next = replaceBoundaries(next, edges, min + (max - min) * (.18 + .64 * random()));
     }
   });
-  return next;
+  return shuffleColors ? shuffleLayoutColors(next, random) : next;
+}
+
+export function resetPosterLayout(state) {
+  const width = 1 / state.columns.length;
+  const rowCount = Math.max(...state.columns.map(({ cells }) => cells.length));
+  const rowBottom = (row) => (row + 1) / rowCount;
+  const aligned = state.columns.every((column) => column.width === width && column.cells.length === rowCount
+    && column.cells.every((cell, row) => !cell.join && cell.bottom === rowBottom(row)));
+  if (aligned) return state;
+
+  const colorById = new Map(posterCells(state).map((cell) => [cell.id, blockAccent(cell)]));
+  const nextId = cellIds(state);
+  const columns = state.columns.map(({ cells }) => {
+    // Place existing blocks in order, as close to their old centers as room allows.
+    const rows = new Map();
+    let previousRow = -1;
+    cells.forEach((cell, index) => {
+      const top = cells[index - 1]?.bottom ?? 0;
+      const preferred = Math.floor((top + cell.bottom) / 2 * rowCount);
+      const row = clamp(preferred, previousRow + 1, rowCount - cells.length + index);
+      rows.set(row, cell);
+      previousRow = row;
+    });
+    const newCells = Array.from({ length: rowCount }, (_, row) => {
+      const bottom = rowBottom(row);
+      const cell = rows.get(row);
+      if (cell && !cell.join) return { ...cell, bottom };
+      const source = cell ?? cells.find((item) => item.bottom >= (row + .5) / rowCount);
+      const role = colorById.get(source.join ?? source.id);
+      return { id: cell?.id ?? nextId(), bottom, role, text: '' };
+    });
+    return { width, cells: newCells };
+  });
+  return { ...state, columns };
 }
 
 function sizeValue(value, mode) {
@@ -516,8 +684,28 @@ export function setPosterSize(state, width, height) {
   return { ...state, preset: `${state.mode}-custom`, width: sizeValue(width, state.mode), height: sizeValue(height, state.mode) };
 }
 
-export function readPoster(input) {
-  const fallback = createPoster();
+export function setPosterTextPadding(state, value) {
+  if (!Number.isFinite(value)) return state;
+  const textPadding = clamp(value, 0, maxTextPadding);
+  return textPadding === state.textPadding ? state : { ...state, textPadding };
+}
+
+export function setPosterBar(state, edge, patch) {
+  if (edge !== 'top' && edge !== 'bottom') return state;
+  const bars = state.bars ?? readPosterBars();
+  const previous = bars[edge];
+  const { heightPx, ...settings } = patch;
+  const next = readPosterBar({
+    ...previous, ...settings,
+    ...(Number.isFinite(heightPx) && { heightPx: clamp(heightPx, 0, dimensions(state).barHeightLimit) }),
+  });
+  if (next.enabled === previous.enabled && next.height === previous.height
+      && next.heightPx === previous.heightPx && next.mode === previous.mode) return state;
+  return { ...state, bars: { ...bars, [edge]: next } };
+}
+
+export function readPoster(input, { strict = false } = {}) {
+  const fallback = strict ? null : createPoster();
   if (!input || !Array.isArray(input.columns) || input.columns.length < 1 || input.columns.length > maxColumns) return fallback;
   const ids = new Set();
   const slots = new Set();
@@ -544,9 +732,11 @@ export function readPoster(input) {
     width: sizeValue(Number.isFinite(input.width) ? input.width : presets[preset].width ?? (mode === 'print' ? 210 : 1080), mode),
     height: sizeValue(Number.isFinite(input.height) ? input.height : presets[preset].height ?? (mode === 'print' ? 297 : 1350), mode),
     scheme: input.scheme === 1 ? 1 : 2,
+    bars: readPosterBars(input.bars),
+    textPadding: Number.isFinite(input.textPadding) ? clamp(input.textPadding, 0, maxTextPadding) : defaultTextPadding,
     textSeed: Number.isSafeInteger(input.textSeed) ? input.textSeed >>> 0 : 0,
     columns: input.columns.map(({ width, cells }) => ({ width, cells: cells.map((cell) => {
-      const text = graphemes(cell.text)[0] ?? '';
+      const text = posterCellLetter(cell.text);
       const accent = blockAccent({ ...cell, accent: accents.includes(cell.accent) ? cell.accent : undefined });
       const block = cell.block === 'text' || cell.block === 'color' ? cell.block : undefined;
       return {
@@ -566,6 +756,8 @@ export function readPoster(input) {
         || Math.abs(span.height - cell.height) > 1e-8) return fallback;
     span.columnEnd = cell.column;
   }
-  state.copy = typeof input.copy === 'string' ? input.copy : readingOrder(state).map((cell) => cell.text).join('');
+  const previousCopy = typeof input.copy === 'string' ? input.copy : readingOrder(state).map((cell) => cell.text).join('');
+  state.copy = uppercasePosterText(previousCopy);
+  if (graphemes(previousCopy).length !== graphemes(state.copy).length) return placeCopy(state, state.copy);
   return state;
 }

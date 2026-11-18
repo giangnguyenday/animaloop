@@ -4,24 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Build, animate, and capture Opla festival key visuals.">
-  <title>ANIMALOOP — Opla Studio</title>
-  <link rel="stylesheet" href="./styles.css">
+  <title>ANIMALOOP — Fry Your Opla</title>
+  <link rel="stylesheet" href="./styles.css?v=project-menu">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="./opla.html" aria-label="Animaloop Studio">
-      <img src="./src/logo.svg" alt="" width="104" height="54">
+      <img src="./src/logo.svg?v=animaloop" alt="" width="120" height="63">
     </a>
-    <h1 id="studio-title" class="header-caption mono">COOK YOUR OPLA</h1>
+    <h1 id="studio-title" class="header-caption mono">FRY YOUR OPLA</h1>
     <div class="header-actions">
-      <details class="action-menu">
+      <details class="action-menu project-menu">
         <summary class="button">Project <svg class="action-icon" width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m3 4.5 3 3 3-3"/></svg></summary>
         <div class="menu-content">
-          <button type="button" id="project-open">Open project</button>
-          <button type="button" id="project-save">Save project</button>
-          <button type="button" id="reset-mode">Reset current tab</button>
-          <button type="button" id="clear-scene">Remove all characters</button>
-          <a class="studio-link" href="./poster.html">Fry your poster</a>
+          <div class="menu-section">
+            <button type="button" id="project-save">Save</button>
+            <button type="button" id="project-open">Open</button>
+          </div>
+          <div class="menu-section">
+            <button type="button" id="reset-mode">Reset</button>
+          </div>
+          <div class="menu-section">
+            <a href="./poster.html">Cook Your Poster</a>
+          </div>
         </div>
       </details>
       <details class="action-menu">
@@ -37,7 +42,7 @@
     <section class="art-area" aria-label="Artboard">
       <div class="stage-card">
         <div class="stage-toolbar">
-          <div class="artboard-name mono"><span class="frame-icon" aria-hidden="true"></span> ARTBOARD <span class="artboard-number">01</span></div>
+          <div class="artboard-name mono"><span class="frame-icon" aria-hidden="true"></span> ARTBOARD</div>
           <div class="zoom-group">
             <button type="button" id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
             <button type="button" id="zoom-reset" title="Reset zoom" aria-label="Reset zoom"><span id="zoom-value">100%</span></button>
@@ -100,15 +105,16 @@
 
       <section id="panel-place" role="tabpanel" aria-labelledby="tab-place">
         <div class="control-section">
-          <div class="section-title"><h2>Characters</h2><span class="section-index mono">01</span></div>
+          <div class="section-title"><h2>Characters</h2></div>
           <div class="item-list" id="character-list"></div>
           <div class="row-actions">
             <button type="button" class="button" id="add-character"><span aria-hidden="true">+</span> Add Opla</button>
             <button type="button" class="button" id="remove-character">Remove</button>
           </div>
+          <button type="button" class="button wide" id="clear-scene" disabled>Remove all Oplas</button>
         </div>
         <div class="control-section">
-          <div class="section-title"><h2>Appearance</h2><span class="section-index mono">02</span></div>
+          <div class="section-title"><h2>Appearance</h2></div>
           <div class="field">
             <span class="field-label" id="character-color-label">Character color</span>
             <div class="palette" id="character-palette" role="group" aria-labelledby="character-color-label"></div>
@@ -140,7 +146,7 @@
 
       <section id="panel-walk" role="tabpanel" aria-labelledby="tab-walk" hidden>
         <div class="control-section">
-          <div class="section-title"><h2>Walk cycle</h2><span class="section-index mono">01</span></div>
+          <div class="section-title"><h2>Walk cycle</h2></div>
           <label class="field">Cycle
             <select id="walk-cycle"></select>
           </label>
@@ -164,7 +170,7 @@
           <button id="walk-play" type="button" class="button primary wide">Play</button>
         </div>
         <div class="control-section">
-          <div class="section-title"><h2>Walking stack</h2><span class="section-index mono">02</span></div>
+          <div class="section-title"><h2>Walking stack</h2></div>
           <div class="item-list" id="walk-list"></div>
           <div class="field">
             <span class="field-label" id="walker-color-label">New walker color</span>
@@ -177,7 +183,7 @@
 
       <section id="panel-effect" role="tabpanel" aria-labelledby="tab-effect" hidden>
         <div class="control-section">
-          <div class="section-title"><h2>Rendering</h2><span class="section-index mono">01</span></div>
+          <div class="section-title"><h2>Rendering</h2></div>
           <label class="field">Effect
             <select id="effect"></select>
           </label>
@@ -219,7 +225,7 @@
 
       <section id="panel-physics" role="tabpanel" aria-labelledby="tab-physics" hidden>
         <div class="control-section">
-          <div class="section-title"><h2>Physics</h2><span class="section-index mono">04</span></div>
+          <div class="section-title"><h2>Physics</h2></div>
           <p class="control-note">Grab Opla anywhere on the artboard. Swing it, let it drop, or flick to throw.</p>
           <label class="field"><span class="value-row">Gravity <output id="physics-gravity-value" for="physics-gravity">1×</output></span>
             <input id="physics-gravity" type="range" min="0" max="2" step=".05" value="1">
@@ -239,7 +245,7 @@
 
       <section id="panel-camera" role="tabpanel" aria-labelledby="tab-camera" hidden>
         <div class="control-section">
-          <div class="section-title"><h2>Camera</h2><span class="section-index mono">05</span></div>
+          <div class="section-title"><h2>Camera</h2></div>
           <p class="control-note">Step back so your arms and legs are in view. Mirror follows your position in the camera, Center keeps one Opla in the middle, and Scene moves all Oplas from Place together.</p>
           <label class="field">Composition
             <select id="camera-composition">
@@ -269,7 +275,7 @@
 
       <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
         <div class="control-section">
-          <div class="section-title"><h2>Artboard</h2><span class="section-index mono">06</span></div>
+          <div class="section-title"><h2>Artboard</h2></div>
           <div class="field">
             <span class="field-label" id="background-color-label">Background color</span>
             <div class="palette" id="background-palette" role="group" aria-labelledby="background-color-label"></div>
@@ -298,6 +304,6 @@
       </section>
     </aside>
   </main>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=shared-palette"></script>
 </body>
 </html>

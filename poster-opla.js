@@ -71,7 +71,7 @@ function availableCount(ids, counts) {
 export function posterOplaCapacity(placements, cells, ids, ignoreId) {
   const distinct = [...new Set(ids)];
   const selected = cellsForIds(cells, distinct);
-  if (selected.length !== distinct.length || (!ignoreId && !connected(selected))) return 0;
+  if (selected.length !== distinct.length || !selected.every(isColorCell) || (!ignoreId && !connected(selected))) return 0;
   return availableCount(distinct, countsByCell(placements, ignoreId));
 }
 
@@ -83,14 +83,12 @@ export function createPosterOpla(placements, cells, ids) {
   return { id: `opla-${next}`, cellIds: cellsForIds(cells, ids).map(({ id }) => id), ...defaultOpla };
 }
 
-function colorCells(cells) {
-  return cells.filter(({ role, text, block }) => (
-    !text && block !== 'text' && (role === 'accentA' || role === 'accentB')
-  ));
+function isColorCell({ role, text, block }) {
+  return !text && block !== 'text' && (role === 'accentA' || role === 'accentB');
 }
 
 export function shufflePosterOplaCapacity(cells) {
-  return colorCells(cells).length;
+  return cells.filter(isColorCell).length;
 }
 
 function shuffle(items, random) {
@@ -102,16 +100,22 @@ function shuffle(items, random) {
 }
 
 export function shufflePosterOplas(cells, amount, random = Math.random) {
-  const candidates = colorCells(cells);
+  const candidates = cells.filter(isColorCell);
   const count = Math.floor(bounded(amount, 0, candidates.length, 0));
   const selected = shuffle(candidates, random).slice(0, count);
+  const fitOrder = shuffle([...fits], random);
+  const layerOrder = shuffle([...layers], random);
   const generated = [];
   let poseChoices = [];
-  for (const { id } of selected) {
+  for (const [index, { id }] of selected.entries()) {
     const placement = createPosterOpla(generated, cells, [id]);
     if (!placement) continue;
     if (!poseChoices.length) poseChoices = shuffle(Object.keys(poses), random);
-    generated.push(updatePosterOpla(placement, { pose: poseChoices.pop() }));
+    generated.push(updatePosterOpla(placement, {
+      pose: poseChoices.pop(),
+      fit: fitOrder[index % fitOrder.length],
+      layer: layerOrder[index % layerOrder.length],
+    }));
   }
   return generated;
 }
@@ -148,7 +152,7 @@ export function updatePosterOpla(placement, patch, maxCount = maxOplas) {
 
 export function readPosterOplas(input, cells, aliases = new Map()) {
   if (!Array.isArray(input)) return [];
-  const knownCells = new Set(cells.map(({ id }) => id));
+  const knownCells = new Set(cells.filter(isColorCell).map(({ id }) => id));
   const ids = new Set();
   const counts = new Map();
   const placements = [];
@@ -169,6 +173,12 @@ function svg(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
   for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
   return element;
+}
+
+function cellClip(id, cells) {
+  const clip = svg('clipPath', { id, clipPathUnits: 'userSpaceOnUse' });
+  for (const { x, y, width, height } of cells) clip.append(svg('rect', { x, y, width, height }));
+  return clip;
 }
 
 function unionBounds(rectangles) {
@@ -292,19 +302,17 @@ export function createPosterOplaLayers(rig, cells, placements, color) {
   const defs = rig.defs.cloneNode(true);
   const under = svg('g', { 'pointer-events': 'none', 'aria-hidden': 'true' });
   const over = svg('g', { 'pointer-events': 'none', 'aria-hidden': 'true' });
+  const colorCells = cells.filter(isColorCell);
+  const overflowClipId = 'poster-opla-color-clip';
+  if (placements.some(({ fit }) => fit === 'bleed')) defs.append(cellClip(overflowClipId, colorCells));
   const animated = [];
   const placementGeometry = new Map();
   for (const placement of placements) {
-    const rectangles = cellsForIds(cells, placement.cellIds);
+    const rectangles = cellsForIds(colorCells, placement.cellIds);
     if (!rectangles.length) continue;
-    const group = svg('g', { 'data-poster-opla': placement.id });
-    if (placement.fit !== 'bleed') {
-      const id = `poster-clip-${placement.id}`;
-      const clip = svg('clipPath', { id, clipPathUnits: 'userSpaceOnUse' });
-      for (const { x, y, width, height } of rectangles) clip.append(svg('rect', { x, y, width, height }));
-      defs.append(clip);
-      group.setAttribute('clip-path', `url(#${id})`);
-    }
+    const clipId = placement.fit === 'bleed' ? overflowClipId : `poster-clip-${placement.id}`;
+    if (placement.fit !== 'bleed') defs.append(cellClip(clipId, rectangles));
+    const group = svg('g', { 'data-poster-opla': placement.id, 'clip-path': `url(#${clipId})` });
     (placement.layer === 'under' ? under : over).append(group);
 
     const artwork = svg('g');

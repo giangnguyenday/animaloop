@@ -5,6 +5,8 @@ import { applyRenderFilter, blendModes, copyCount, effectCopy, effectLabels, eff
 import { createPhysics } from './physics.js';
 import { createCamera } from './camera.js';
 import { download, svgToPng } from './image-export.js';
+import { bindActionMenus, bindProjectFiles } from './project-menu.js';
+import { loadPalette } from './palette.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -987,10 +989,7 @@ function bindControls() {
     event.target.closest('details').open = false;
     resetMode();
   });
-  $('clear-scene').addEventListener('click', (event) => {
-    event.target.closest('details').open = false;
-    clearScene();
-  });
+  $('clear-scene').addEventListener('click', clearScene);
   $('undo-scene').addEventListener('click', () => restoreHistory(undoHistory, redoHistory, 'Edit undone.'));
   $('redo-scene').addEventListener('click', () => restoreHistory(redoHistory, undoHistory, 'Edit redone.'));
   $('pose').addEventListener('change', (event) => {
@@ -1203,23 +1202,10 @@ function bindControls() {
       exportImage(format);
     });
   }
-  $('project-save').addEventListener('click', (event) => {
-    event.target.closest('details').open = false;
-    const project = { ...state, version: 1, mode: tab };
-    download(new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }), 'animaloop-project.json');
-    notify('Editable project saved.');
-  });
-  const picker = document.createElement('input');
-  picker.type = 'file';
-  picker.accept = 'application/json,.json';
-  $('project-open').addEventListener('click', (event) => {
-    event.target.closest('details').open = false;
-    picker.click();
-  });
-  picker.addEventListener('change', async () => {
-    if (!picker.files.length) return;
-    try {
-      const data = JSON.parse(await picker.files[0].text());
+  bindProjectFiles({
+    filename: 'animaloop-project.json',
+    getProject: () => ({ ...state, version: 1, mode: tab }),
+    openProject(data) {
       state = readProject(data);
       playing = false;
       customSize = !dimensions.includes(state.size);
@@ -1229,29 +1215,11 @@ function bindControls() {
       undoHistory.length = 0;
       redoHistory.length = 0;
       changed(true, true);
-      notify('Project opened.');
-    } catch {
-      notify('Choose a valid ANIMALOOP project file.');
-    } finally {
-      picker.value = '';
-    }
+    },
+    notify,
+    invalidMessage: 'Choose a valid Opla Studio project file.',
   });
-  document.addEventListener('click', (event) => {
-    for (const menu of document.querySelectorAll('.action-menu[open]')) {
-      if (!menu.contains(event.target)) menu.open = false;
-    }
-  });
-}
-
-async function loadPalette() {
-  const response = await fetch('./palette.json', { cache: 'no-cache' });
-  if (!response.ok) throw new Error('Could not load palette.json.');
-  const data = await response.json();
-  const entries = Array.isArray(data) ? data : data.colors;
-  if (!Array.isArray(entries)) throw new Error('palette.json needs an array of colors.');
-  return entries.map((entry) => typeof entry === 'string' ? { name: entry, hex: entry } : entry)
-    .filter((entry) => hex(entry?.hex))
-    .map(({ name, hex: color, group }) => ({ name: name || color, hex: color, group: typeof group === 'string' ? group : '' }));
+  bindActionMenus();
 }
 
 async function init() {

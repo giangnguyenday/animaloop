@@ -4,22 +4,30 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Make an ANIMALOOP poster with a staggered grid and variable lettering.">
-  <title>ANIMALOOP — Poster Studio</title>
-  <link rel="stylesheet" href="./styles.css">
-  <link rel="stylesheet" href="./poster.css">
+  <title>ANIMALOOP — Cook Your Poster</title>
+  <link rel="stylesheet" href="./styles.css?v=grid-labels">
+  <link rel="stylesheet" href="./poster.css?v=box-color-order">
 </head>
 <body class="poster-editor">
   <header class="topbar">
     <a class="brand" href="./" aria-label="Animaloop Studio">
-      <img src="./src/logo.svg" alt="" width="104" height="54">
+      <img src="./src/logo.svg?v=animaloop" alt="" width="120" height="63">
     </a>
-    <h1 id="studio-title" class="header-caption mono">FRY YOUR POSTER</h1>
+    <h1 id="studio-title" class="header-caption mono">COOK YOUR POSTER</h1>
     <div class="header-actions">
-      <details class="action-menu">
+      <details class="action-menu project-menu">
         <summary class="button">Project <svg class="action-icon" width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m3 4.5 3 3 3-3"/></svg></summary>
         <div class="menu-content">
-          <button type="button" id="poster-reset">Reset to sample</button>
-          <a class="studio-link" href="./opla.html">Cook your Opla</a>
+          <div class="menu-section">
+            <button type="button" id="project-save">Save</button>
+            <button type="button" id="project-open">Open</button>
+          </div>
+          <div class="menu-section">
+            <button type="button" id="poster-reset">Reset</button>
+          </div>
+          <div class="menu-section">
+            <a href="./opla.html">Fry Your Opla</a>
+          </div>
         </div>
       </details>
       <details class="action-menu">
@@ -49,8 +57,10 @@
             <div id="stage-wrap">
               <svg id="poster-ruler-x" class="poster-ruler" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden></svg>
               <svg id="poster-ruler-y" class="poster-ruler" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden></svg>
+              <div id="poster-grid-labels" aria-hidden="true" hidden></div>
               <svg id="stage" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1350" role="group" aria-label="Poster artboard" tabindex="0"></svg>
               <svg id="poster-opla-transform" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+              <svg id="poster-content-transform" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" hidden></svg>
               <input id="poster-cell-editor" type="text" aria-label="Edit block letter" autocomplete="off" autocapitalize="off" spellcheck="false" tabindex="-1" hidden>
             </div>
           </div>
@@ -62,6 +72,9 @@
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.3"/><path d="M2.25 8h11.5"/></svg>
             </button>
             <button type="button" class="button frame-button" id="poster-merge-cell" aria-label="Merge blocks" title="Merge blocks" disabled>
+              <svg width="16" height="16" fill="currentColor" aria-hidden="true" focusable="false"><use href="./src/phosphor/tabs.svg?v=poster-assets#brackets-square"/></svg>
+            </button>
+            <button type="button" class="button frame-button" id="poster-delete-cell" aria-label="Delete block" title="Delete block" disabled>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.3"/><path d="M5.75 5.75 8 8l2.25-2.25m-4.5 4.5L8 8l2.25 2.25"/></svg>
             </button>
             <button type="button" class="button frame-button" id="poster-swap-colors" aria-label="Swap colors" title="Swap colors" disabled>
@@ -89,7 +102,7 @@
         <button type="button" role="tab" id="poster-tab-artboard" data-poster-tab="artboard" aria-label="Artboard" aria-selected="true" aria-controls="poster-panel-artboard" title="Artboard">
           <svg class="poster-tab-line-icon" width="21" height="21" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4M4 11v2m16-2v2M11 4h2m-2 16h2"/></svg>
         </button>
-        <button type="button" role="tab" id="poster-tab-layout" data-poster-tab="layout" aria-label="Layout" aria-selected="false" aria-controls="poster-panel-layout" tabindex="-1" title="Layout">
+        <button type="button" role="tab" id="poster-tab-grid" data-poster-tab="grid" aria-label="Grid" aria-selected="false" aria-controls="poster-panel-grid" tabindex="-1" title="Grid">
           <svg class="poster-tab-line-icon" width="21" height="21" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="4" width="17" height="16" rx="1.25"/><path d="M9.25 4v16m5.5-16v16M3.5 10h5.75m0 4h5.5m0-5h5.75"/></svg>
         </button>
         <button type="button" role="tab" id="poster-tab-type" data-poster-tab="type" aria-label="Type" aria-selected="false" aria-controls="poster-panel-type" tabindex="-1" title="Type">
@@ -98,6 +111,9 @@
         <button type="button" role="tab" id="poster-tab-opla" data-poster-tab="opla" aria-label="Add Opla" aria-selected="false" aria-controls="poster-panel-opla" tabindex="-1" title="Add Opla">
           <svg class="poster-tab-line-icon" width="21" height="21" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19.5 14c0 4.4-3.2 7-7.5 7S4.5 18.4 4.5 14C4.5 9.5 8.2 3 12 3s7.5 6.5 7.5 11Z"/></svg>
         </button>
+        <button type="button" role="tab" id="poster-tab-layout" data-poster-tab="layout" aria-label="Layout" aria-selected="false" aria-controls="poster-panel-layout" tabindex="-1" title="Layout">
+          <svg width="21" height="21" aria-hidden="true" focusable="false"><use href="./src/phosphor/tabs.svg?v=poster-assets#layout"/></svg>
+        </button>
         <button type="button" role="tab" id="poster-tab-settings" data-poster-tab="settings" aria-label="Settings" aria-selected="false" aria-controls="poster-panel-settings" tabindex="-1" title="Settings">
           <svg width="21" height="21" aria-hidden="true" focusable="false"><use href="./src/phosphor/tabs.svg#settings"/></svg>
         </button>
@@ -105,7 +121,7 @@
 
       <section id="poster-panel-artboard" role="tabpanel" aria-labelledby="poster-tab-artboard">
         <div class="control-section">
-          <div class="section-title"><h2>Artboard size</h2></div>
+          <div class="section-title"><h2>Artboard</h2></div>
           <label class="field">Format
             <select id="poster-size-mode">
               <option value="digital">Digital</option>
@@ -114,14 +130,52 @@
           </label>
           <label class="field">Size <select id="poster-size"></select></label>
           <form class="position-fields" id="poster-custom-size" hidden>
-            <label class="field">Width <span class="poster-size-unit" id="poster-size-unit">px</span>
+            <label class="field">Width <span class="poster-size-unit" data-artboard-unit>px</span>
               <input type="number" id="poster-width" min="1" step="any" required>
             </label>
-            <label class="field">Height <span class="poster-size-unit">px</span>
+            <label class="field">Height <span class="poster-size-unit" data-artboard-unit>px</span>
               <input type="number" id="poster-height" min="1" step="any" required>
             </label>
             <button class="button" type="submit">Apply size</button>
           </form>
+        </div>
+        <div class="control-section">
+          <div class="section-title"><h2>Background image</h2></div>
+          <div class="row-actions">
+            <button type="button" class="button" id="poster-background-add">Add image</button>
+            <button type="button" class="button" id="poster-background-remove" disabled>Remove image</button>
+          </div>
+          <input type="file" id="poster-background-file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" hidden>
+          <p class="control-note" id="poster-background-name" hidden></p>
+        </div>
+        <div class="control-section">
+          <div class="section-title"><h2>Bars</h2></div>
+          <label class="checkbox-field"><input type="checkbox" id="poster-bar-top-enabled" aria-controls="poster-bar-top-controls"> Top bar</label>
+          <div class="position-fields" id="poster-bar-top-controls" hidden>
+            <label class="field">Top bar height (px)
+              <input type="number" id="poster-bar-top-height" min="0" step="1" inputmode="numeric">
+            </label>
+            <label class="field">Top bar mode
+              <select id="poster-bar-top-mode">
+                <option value="add">Add</option>
+                <option value="overlap">Overlap</option>
+                <option value="push">Push</option>
+              </select>
+            </label>
+          </div>
+          <label class="checkbox-field"><input type="checkbox" id="poster-bar-bottom-enabled" aria-controls="poster-bar-bottom-controls"> Bottom bar</label>
+          <div class="position-fields" id="poster-bar-bottom-controls" hidden>
+            <label class="field">Bottom bar height (px)
+              <input type="number" id="poster-bar-bottom-height" min="0" step="1" inputmode="numeric">
+            </label>
+            <label class="field">Bottom bar mode
+              <select id="poster-bar-bottom-mode">
+                <option value="add">Add</option>
+                <option value="overlap">Overlap</option>
+                <option value="push">Push</option>
+              </select>
+            </label>
+          </div>
         </div>
         <div class="control-section">
           <div class="section-title"><h2>Colors</h2></div>
@@ -150,7 +204,7 @@
         </div>
       </section>
 
-      <section id="poster-panel-layout" role="tabpanel" aria-labelledby="poster-tab-layout" hidden>
+      <section id="poster-panel-grid" role="tabpanel" aria-labelledby="poster-tab-grid" hidden>
         <div class="control-section">
           <div class="section-title"><h2>Grid</h2></div>
           <div class="field">
@@ -161,8 +215,12 @@
               <button type="button" class="button" id="poster-add-column" aria-label="Add a column">+</button>
             </div>
           </div>
-          <label class="checkbox-field"><input type="checkbox" id="poster-random-lock-columns" checked> Keep column count</label>
+          <div class="position-fields">
+            <label class="checkbox-field"><input type="checkbox" id="poster-random-lock-columns" checked> Keep column count</label>
+            <label class="checkbox-field"><input type="checkbox" id="poster-random-shuffle-colors"> Shuffle colors</label>
+          </div>
           <button type="button" class="button wide" id="poster-random-layout">Randomize layout</button>
+          <button type="button" class="button wide" id="poster-reset-layout">Reset layout</button>
         </div>
         <div class="control-section">
           <div class="section-title"><h2 id="poster-block-title">Block</h2><output id="poster-selection" aria-live="polite">None selected</output></div>
@@ -207,6 +265,10 @@
             <textarea id="poster-text" rows="3" spellcheck="false" aria-describedby="poster-text-note"></textarea>
           </label>
           <p class="control-note" id="poster-text-note">Spaces give words room to move between rows.</p>
+          <label class="field">
+            <span class="value-row">Horizontal padding per side <span class="poster-size-unit">% of poster width</span></span>
+            <input type="number" id="poster-text-padding" min="0" step="any" value="1">
+          </label>
           <label class="checkbox-field"><input type="checkbox" id="poster-random-jumble-grid"> Jumble grid</label>
           <button type="button" class="button wide" id="poster-random-text" disabled>Randomize text position</button>
           <button type="button" class="button wide" id="poster-remove-text" disabled>Remove all text blocks</button>
@@ -228,7 +290,7 @@
         </form>
         <div class="control-section">
           <div class="section-title"><h2>Opla</h2></div>
-          <p class="control-note" id="poster-opla-selection" aria-live="polite">Select a block or Shift-click neighboring blocks.</p>
+          <p class="control-note" id="poster-opla-selection" aria-live="polite">Select a color block or Shift-click neighboring color blocks.</p>
           <label class="field">Placement
             <select id="poster-opla-placement"><option value="">New placement</option></select>
           </label>
@@ -255,8 +317,8 @@
             </label>
             <label class="field">Layer
               <select id="poster-opla-layer">
-                <option value="over">Over text</option>
-                <option value="under">Under text</option>
+                <option value="over">In front of Oplas</option>
+                <option value="under">Behind Oplas</option>
               </select>
             </label>
           </div>
@@ -319,6 +381,165 @@
             <button type="button" class="button primary" id="poster-opla-add" disabled>Add Opla</button>
             <button type="button" class="button" id="poster-opla-remove" disabled>Remove</button>
           </div>
+          <button type="button" class="button wide" id="poster-clear-oplas" disabled>Remove all Oplas</button>
+        </div>
+      </section>
+
+      <section id="poster-panel-layout" role="tabpanel" aria-labelledby="poster-tab-layout" hidden>
+        <div class="control-section">
+          <div class="section-title"><h2>Layout</h2></div>
+          <label class="field">New text style
+            <select id="poster-content-preset">
+              <option value="body">Body</option>
+              <option value="note">Note</option>
+              <option value="wide">Wide</option>
+              <option value="jumble">Jumble</option>
+            </select>
+          </label>
+          <div class="position-fields poster-content-actions">
+            <button type="button" class="button primary" id="poster-content-add-text">Add text box</button>
+            <button type="button" class="button" id="poster-content-import">Import artwork</button>
+          </div>
+          <input type="file" id="poster-content-file" accept="image/svg+xml,image/png,image/jpeg,image/webp,image/gif,image/avif,.svg" multiple hidden>
+          <p class="control-note">Paste SVG artwork or images from the clipboard. Shift-click to select multiple objects.</p>
+        </div>
+        <div class="control-section poster-layout-objects">
+          <div class="section-title"><h2 id="poster-objects-heading">Objects</h2></div>
+          <div id="poster-content-list" class="item-list" role="group" aria-labelledby="poster-objects-heading"></div>
+        </div>
+        <div class="control-section" id="poster-content-selected" hidden>
+          <div class="section-title"><h2 id="poster-content-selection-title">Selected object</h2></div>
+          <div class="poster-content-object-fields">
+            <div id="poster-content-text-controls" hidden>
+              <label class="field poster-content-copy">Text
+                <textarea id="poster-content-text" rows="3" maxlength="2500"></textarea>
+              </label>
+              <label class="field">Style
+                <select id="poster-content-style">
+                  <option value="body">Body</option>
+                  <option value="note">Note</option>
+                  <option value="wide">Wide</option>
+                  <option value="jumble">Jumble</option>
+                </select>
+              </label>
+              <label class="field">Font size (px)
+                <input type="number" id="poster-content-text-size" step=".01" required>
+              </label>
+            </div>
+            <label class="field poster-content-width">Width (px)
+              <input type="number" id="poster-content-scale" step=".01" required>
+            </label>
+            <label class="field" id="poster-content-asset-height-field" hidden>Height (px)
+              <input type="number" id="poster-content-asset-height" step=".01" required>
+            </label>
+          </div>
+          <div id="poster-content-color-controls" class="field" hidden>
+            <span>Text color</span>
+            <div class="palette poster-content-palette">
+              <div id="poster-content-color-swatches" class="palette-group" role="group" aria-label="Text colors"></div>
+              <label class="custom-color poster-content-custom-color" title="Custom text color">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M8 4v8m-4-4h8"/></svg>
+                <input type="color" id="poster-content-text-color" aria-label="Custom text color" value="#423625">
+              </label>
+            </div>
+          </div>
+          <div id="poster-content-background-controls" class="field" hidden>
+            <span>Box color</span>
+            <div class="palette poster-content-palette poster-box-palette">
+              <div id="poster-content-background-swatches" class="palette-group" role="group" aria-label="Box colors"></div>
+              <div class="palette-group">
+                <label class="custom-color poster-content-custom-color" title="Custom box color">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M8 4v8m-4-4h8"/></svg>
+                  <input type="color" id="poster-content-background-color" aria-label="Custom box color" value="#F5F5F5">
+                </label>
+                <button type="button" class="swatch" id="poster-content-background-none" aria-label="No box fill" aria-pressed="true" title="No box fill">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M4 12l8-8"/></svg>
+                </button>
+              </div>
+            </div>
+            <label class="field">Padding (px)
+              <input type="number" id="poster-content-padding" min="0" step=".01" required>
+            </label>
+          </div>
+          <div class="poster-content-alignment">
+            <div class="field" id="poster-content-text-align-controls" hidden>
+              <span id="poster-content-text-align-label">Text alignment</span>
+              <div class="poster-content-icon-buttons" id="poster-content-text-align" role="group" aria-labelledby="poster-content-text-align-label">
+                <button type="button" class="button" data-text-align="left" aria-label="Align text left" aria-pressed="false" title="Align text left">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 3.5h11m-11 3h7m-7 3h11m-11 3h7"/></svg>
+                </button>
+                <button type="button" class="button" data-text-align="center" aria-label="Center text" aria-pressed="false" title="Center text">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 3.5h11m-9 3h7m-9 3h11m-9 3h7"/></svg>
+                </button>
+                <button type="button" class="button" data-text-align="right" aria-label="Align text right" aria-pressed="false" title="Align text right">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 3.5h11m-7 3h7m-11 3h11m-7 3h7"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <span id="poster-content-align-x-label">Horizontal</span>
+              <div class="poster-content-icon-buttons" id="poster-content-align-x" role="group" aria-labelledby="poster-content-align-x-label">
+                <button type="button" class="button" data-align="left" aria-label="Align objects left" title="Align objects left">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 2.5v11m3-9h8v2h-8zm0 5h5.5v2H5.5z"/></svg>
+                </button>
+                <button type="button" class="button" data-align="center" aria-label="Center objects horizontally" title="Center objects horizontally">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 2.5v2m0 2v3m0 2v2m-5-9h10v2H3zm2 5h6v2H5z"/></svg>
+                </button>
+                <button type="button" class="button" data-align="right" aria-label="Align objects right" title="Align objects right">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 2.5v11m-11-9h8v2h-8zm2.5 5h5.5v2H5z"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <span id="poster-content-align-y-label">Vertical</span>
+              <div class="poster-content-icon-buttons" id="poster-content-align-y" role="group" aria-labelledby="poster-content-align-y-label">
+                <button type="button" class="button" data-align="top" aria-label="Align objects top" title="Align objects top">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 2.5h11m-9 3v8h2v-8zm5 0v5.5h2V5.5z"/></svg>
+                </button>
+                <button type="button" class="button" data-align="middle" aria-label="Center objects vertically" title="Center objects vertically">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 8h2m2 0h3m2 0h2m-9-5v10h2V3zm5 2v6h2V5z"/></svg>
+                </button>
+                <button type="button" class="button" data-align="bottom" aria-label="Align objects bottom" title="Align objects bottom">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 13.5h11m-9-11v8h2v-8zm5 2.5v5.5h2V5z"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <p class="control-note">Drag to move the selection. Drag a corner to resize it.</p>
+          <button type="button" class="button wide" id="poster-content-remove">Remove object</button>
+        </div>
+        <div class="control-section">
+          <div class="section-title"><h2 id="poster-assets-heading">Assets</h2></div>
+          <p class="control-note">Drag a logo onto the artboard or click to add it.</p>
+          <div id="poster-content-assets" role="group" aria-labelledby="poster-assets-heading">
+            <div class="poster-asset-pair" role="group" aria-labelledby="poster-assets-animaloop">
+              <span id="poster-assets-animaloop" class="field-label">AnimaLoop</span>
+              <button type="button" class="poster-asset" data-poster-asset="./src/logo.svg?v=animaloop" data-poster-asset-name="AnimaLoop, umber" aria-label="Add AnimaLoop logo in umber" draggable="true">
+                <img src="./src/logo.svg?v=animaloop" alt="" draggable="false">
+              </button>
+              <button type="button" class="poster-asset poster-asset-dark" data-poster-asset="./src/poster-assets/animaloop-paper.svg" data-poster-asset-name="AnimaLoop, paper" aria-label="Add AnimaLoop logo in paper white" draggable="true">
+                <img src="./src/poster-assets/animaloop-paper.svg" alt="" draggable="false">
+              </button>
+            </div>
+            <div class="poster-asset-pair" role="group" aria-labelledby="poster-assets-behalf">
+              <span id="poster-assets-behalf" class="field-label">Behalf</span>
+              <button type="button" class="poster-asset" data-poster-asset="./src/poster-assets/behalf-black.svg" data-poster-asset-name="Behalf, black" aria-label="Add Behalf logo in black" draggable="true">
+                <img src="./src/poster-assets/behalf-black.svg" alt="" draggable="false">
+              </button>
+              <button type="button" class="poster-asset poster-asset-dark" data-poster-asset="./src/poster-assets/behalf-white.svg" data-poster-asset-name="Behalf, white" aria-label="Add Behalf logo in white" draggable="true">
+                <img src="./src/poster-assets/behalf-white.svg" alt="" draggable="false">
+              </button>
+            </div>
+            <div class="poster-asset-pair" role="group" aria-labelledby="poster-assets-rmit">
+              <span id="poster-assets-rmit" class="field-label">RMIT SCD</span>
+              <button type="button" class="poster-asset" data-poster-asset="./src/poster-assets/rmit-color.svg" data-poster-asset-name="RMIT SCD, navy and red" aria-label="Add RMIT SCD logo in navy and red" draggable="true">
+                <img src="./src/poster-assets/rmit-color.svg" alt="" draggable="false">
+              </button>
+              <button type="button" class="poster-asset poster-asset-dark" data-poster-asset="./src/poster-assets/rmit-white.svg" data-poster-asset-name="RMIT SCD, white and red" aria-label="Add RMIT SCD logo in white and red" draggable="true">
+                <img src="./src/poster-assets/rmit-white.svg" alt="" draggable="false">
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -327,12 +548,13 @@
           <div class="section-title"><h2>Settings</h2></div>
           <label class="checkbox-field"><input type="checkbox" id="poster-ruler"> Show rulers</label>
           <label class="checkbox-field"><input type="checkbox" id="poster-guides" checked> Show grid lines</label>
+          <label class="checkbox-field"><input type="checkbox" id="poster-show-coordinates"> Show column and row labels</label>
           <label class="checkbox-field"><input type="checkbox" id="poster-show-text-order"> Show reading order</label>
           <label class="checkbox-field"><input type="checkbox" id="poster-workspace-dots" checked> Show workspace dots</label>
         </div>
       </section>
     </aside>
   </main>
-  <script type="module" src="./poster.js?v=opla-shuffle"></script>
+  <script type="module" src="./poster.js?v=jumble"></script>
 </body>
 </html>

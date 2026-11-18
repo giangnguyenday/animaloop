@@ -1,18 +1,25 @@
 import {
   createPoster, resetPosterGrid, readPoster, posterCells, posterText, setPosterText, graphemes,
-  dimensions, presets, schemes, sizeLimits, printPpi, setPreset, setPosterSize,
-  maxColumns, setColumnCount, moveColumnBoundary, moveRowBoundary, canMoveRowBoundary,
-  splitCell, canSplitCell, mergeCells, canMergeCells, updateCell, setBlockRole,
-  randomizeLayout, randomizeTextPositions, clearTextBlocks,
-} from './poster-model.js?v=opla-shuffle';
-import { loadPosterFont, renderPoster } from './poster-render.js?v=block-proportions';
+  uppercasePosterText, posterCellLetter,
+  dimensions, presets, schemes, sizeLimits, printPpi, setPreset, setPosterSize, setPosterTextPadding, maxTextPadding,
+  setPosterBar,
+  maxColumns, setColumnCount, moveColumnBoundary, moveRowBoundary, canMoveRowBoundary, rowBoundarySnapTargets,
+  splitCell, canSplitCell, mergeCells, canMergeCells, deleteCell, canDeleteCell, updateCell, setBlockRole, swapPosterBlocks,
+  randomizeLayout, resetPosterLayout, randomizeTextPositions, clearTextBlocks,
+} from './poster-model.js?v=poster-background';
+import { loadPosterFont, renderPoster, renderPosterBars } from './poster-render.js?v=poster-background';
+import { importPosterContent, readPosterContent, renderPosterContent } from './poster-content.js?v=jumble';
+import { bindPosterContent } from './poster-content-editor.js?v=jumble';
+import { loadPalette } from './palette.js';
+import { loadPosterDraft, savePosterDraft } from './poster-storage.js';
 import { download, setPngDensity, svgToPng } from './image-export.js';
+import { bindActionMenus, bindProjectFiles } from './project-menu.js';
 import { cycles, cycleLabels, poseLabels } from './motion.js';
 import {
   loadPosterOplaRig, readPosterOplas, createPosterOpla, updatePosterOpla, posterOplaCapacity,
   createPosterOplaLayers, mountPosterOplaLayers, duplicatePosterOpla, minPosterOplaSize, maxPosterOplaSize,
   shufflePosterOplaCapacity, shufflePosterOplas,
-} from './poster-opla.js?v=opla-shuffle';
+} from './poster-opla.js?v=type-blocks';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -31,17 +38,24 @@ const posterClipboardPrefix = 'ANIMALOOP Poster Opla: ';
 const oplaClipboardPrefix = 'ANIMALOOP Opla: ';
 const tabButtons = [...document.querySelectorAll('[data-poster-tab]')];
 const cellEditor = $('poster-cell-editor');
+const barEdges = ['top', 'bottom'];
 const editorOptions = [
-  'poster-ruler', 'poster-guides', 'poster-workspace-dots', 'poster-show-text-order',
-  'poster-random-lock-columns', 'poster-random-jumble-grid',
+  'poster-ruler', 'poster-guides', 'poster-show-coordinates', 'poster-workspace-dots', 'poster-show-text-order',
+  'poster-random-lock-columns', 'poster-random-shuffle-colors', 'poster-random-jumble-grid',
 ];
 let state = createPoster();
+let contentPalette;
 try {
-  const saved = localStorage.getItem(storageKey);
+  const saved = await loadPosterDraft(storageKey);
   if (saved) {
     const input = JSON.parse(saved);
     state = readPoster(input);
-    state = { ...state, oplas: readPosterOplas(state.oplas ?? input?.oplas, posterCells(state)) };
+    state = {
+      ...state,
+      oplas: readPosterOplas(state.oplas ?? input?.oplas, posterCells(state)),
+      content: readPosterContent(input?.content),
+      backgroundImage: readBackgroundImage(input?.backgroundImage),
+    };
   }
 } catch { /* Open the sample if the saved poster is unavailable. */ }
 try {
@@ -54,6 +68,7 @@ let activeTab = 'artboard';
 let zoom = 1;
 let fontReady = false;
 let pendingEdit;
+let backgroundImageRequest = 0;
 let drag;
 let statusTimer;
 let oplaRig;
@@ -68,6 +83,25 @@ const oplaDraft = {
   count: 1, fit: 'fit', layer: 'over', size: 1, x: 0, y: 0, rotation: 0,
   mode: 'pose', pose: 'neutral', cycle: 'stroll', scale: 'same',
 };
+const contentEditor = bindPosterContent({
+  stage,
+  getObjects: () => state.content ?? [],
+  getLayout: () => {
+    const { viewWidth, viewHeight } = dimensions(state);
+    const { text, background, accentA, accentB, opla } = schemes[state.scheme];
+    const palette = contentPalette ?? [
+      { name: 'First accent', color: accentA },
+      { name: 'Second accent', color: accentB },
+      { name: 'Text', color: text },
+      { name: 'Background', color: background },
+      { name: 'Opla', color: opla },
+    ];
+    return { width: viewWidth, height: viewHeight, textColor: text, palette };
+  },
+  isActive: () => activeTab === 'layout',
+  apply: (content, source) => apply({ ...state, content }, source),
+  finishEdit, cancelEdit, notify,
+});
 
 function svg(name, attributes) {
   const element = document.createElementNS(svgNamespace, name);
@@ -82,8 +116,15 @@ function notify(message, duration = 3500) {
 }
 
 function save() {
-  try { localStorage.setItem(storageKey, JSON.stringify(state)); }
-  catch { /* Editing and exports still work when storage is unavailable. */ }
+  void savePosterDraft(storageKey, JSON.stringify(state)).catch(() => {
+    notify('Browser storage is unavailable. Use Project → Save to keep an editable copy.');
+  });
+}
+
+function readBackgroundImage(input) {
+  if (!input || typeof input !== 'object') return undefined;
+  const [image] = readPosterContent([{ id: 'background-image', type: 'image', name: input.name, source: input.source }]);
+  if (image) return { name: image.name, source: image.source };
 }
 
 function layout(poster) {
@@ -92,10 +133,16 @@ function layout(poster) {
   return {
     width: size.viewWidth,
     height: size.viewHeight,
+    barHeights: size.barHeights,
     background: scheme.background,
+    backgroundImage: poster.backgroundImage?.source,
     textColor: scheme.text,
+    textPadding: poster.textPadding,
     oplaColor: scheme.opla,
-    cells: posterCells(poster).map((cell) => ({ ...cell, color: scheme[cell.role] })),
+    cells: posterCells(poster).map((cell) => ({
+      ...cell,
+      color: poster.backgroundImage && !isTextBlock(cell) ? 'none' : scheme[cell.role],
+    })),
   };
 }
 
@@ -194,6 +241,7 @@ function syncOplaPlayback() {
 
 function updateOplaControls(cells) {
   const placements = state.oplas ?? [];
+  $('poster-clear-oplas').disabled = !placements.length;
   const shuffleCapacity = shufflePosterOplaCapacity(cells);
   const amount = $('poster-shuffle-opla-amount');
   amount.max = Math.max(1, shuffleCapacity);
@@ -209,15 +257,15 @@ function updateOplaControls(cells) {
   const capacity = posterOplaCapacity(placements, cells, ids, placement?.id);
   const options = placement ?? oplaDraft;
   const menu = $('poster-opla-placement');
-  const labels = new Map(cells.map(({ id }, index) => [id, index + 1]));
+  const labels = new Map(cells.map((cell) => [cell.id, cellAddress(cell)]));
   menu.replaceChildren(new Option('New placement', ''), ...placements.map((item, index) => new Option(
-    `Opla ${index + 1} · Block ${item.cellIds.map((id) => `#${labels.get(id)}`).join(', ')}`, item.id,
+    `Opla ${index + 1} · ${item.cellIds.length === 1 ? 'Block' : 'Blocks'} ${item.cellIds.map((id) => labels.get(id)).join(', ')}`, item.id,
   )));
   menu.value = activeOplaId;
 
   $('poster-opla-selection').textContent = oplaRigError ? 'Opla artwork could not load.'
-    : !ids.length ? 'Select a block or Shift-click neighboring blocks.'
-      : !capacity ? 'Select connected blocks with room for Opla.'
+    : !ids.length ? 'Select a color block or Shift-click neighboring color blocks.'
+      : !capacity ? 'Select connected color blocks with room for Opla.'
         : `${ids.length} ${ids.length === 1 ? 'block' : 'blocks'} · ${capacity} Opla capacity`;
   $('poster-opla-add').disabled = !oplaRig || !capacity || !!placement;
   $('poster-opla-remove').disabled = !placement;
@@ -263,7 +311,7 @@ function copyPosterPlacement(source, ids, offset = 20, editSource) {
   const cells = posterCells(state);
   const duplicate = duplicatePosterOpla(placements, cells, source, ids);
   if (!duplicate) {
-    notify('Select connected blocks with room for this placement.');
+    notify('Select connected color blocks with room for this placement.');
     return;
   }
   const targets = cells.filter(({ id }) => duplicate.cellIds.includes(id));
@@ -275,6 +323,12 @@ function copyPosterPlacement(source, ids, offset = 20, editSource) {
   for (const id of placed.cellIds) selectedIds.add(id);
   apply({ ...state, oplas: [...placements, placed] }, editSource);
   return placed;
+}
+
+const columnLetter = (column) => String.fromCharCode(65 + column);
+
+function cellAddress({ column, row }) {
+  return `${columnLetter(column)}${row + 1}`;
 }
 
 function cellEdges(cell) {
@@ -291,6 +345,7 @@ function cellEdges(cell) {
 
 function renderGuides(cells, selection) {
   const overlay = svg('g', { 'aria-hidden': 'true' });
+  const unit = dimensions(state).viewWidth / Math.max(1, stage.clientWidth);
   if ($('poster-guides').checked) {
     for (const { x, y, width, height } of cells) {
       overlay.append(svg('rect', { class: 'poster-guide', x, y, width, height }));
@@ -299,7 +354,7 @@ function renderGuides(cells, selection) {
   for (const { x, y, width, height } of selection) {
     overlay.append(svg('rect', { class: 'poster-selection', x, y, width, height }));
   }
-  if (selection.length === 1 && activeTab !== 'opla') {
+  if (selection.length === 1 && activeTab !== 'opla' && activeTab !== 'layout') {
     const [cell] = selection;
     const { x, y, width, height } = cell;
     const right = x + width;
@@ -313,7 +368,6 @@ function renderGuides(cells, selection) {
     if (edges.right) overlay.append(handle('column', right, y, right, bottom));
   }
   if ($('poster-show-text-order').checked) {
-    const unit = dimensions(state).viewWidth / Math.max(1, stage.clientWidth);
     for (const cell of cells) {
       if (!cell.text || !Number.isSafeInteger(cell.slot)) continue;
       const radius = Math.min(9 * unit, cell.width / 3, cell.height / 3);
@@ -329,25 +383,59 @@ function renderGuides(cells, selection) {
   stage.append(overlay);
 }
 
+function renderGridLabels({ viewHeight, gridY, gridHeight }, activeColumn) {
+  const axis = $('poster-grid-labels');
+  axis.hidden = !$('poster-show-coordinates').checked;
+  if (axis.hidden) return;
+
+  let left = 0;
+  const columnLabels = state.columns.map(({ width }, column) => {
+    const label = document.createElement('span');
+    label.className = 'poster-column-label';
+    label.classList.toggle('active', column === activeColumn);
+    label.style.left = `${100 * (left + width / 2)}%`;
+    label.textContent = columnLetter(column);
+    left += width;
+    return label;
+  });
+
+  // Row heights vary by column; the left axis follows the highlighted column.
+  let top = 0;
+  const rowLabels = state.columns[activeColumn].cells.map(({ bottom }, row) => {
+    const label = document.createElement('span');
+    label.className = 'poster-row-label';
+    const center = gridY + (top + bottom) / 2 * gridHeight;
+    label.style.top = `${100 * center / viewHeight}%`;
+    label.textContent = row + 1;
+    top = bottom;
+    return label;
+  });
+  axis.replaceChildren(...columnLabels, ...rowLabels);
+}
+
 function renderPreview(poster, selection) {
   const hadFocus = document.activeElement === stage || stage.contains(document.activeElement);
   renderPoster(stage, poster);
   stage.dataset.mode = activeTab;
   const { cells } = poster;
   if (!cells.some(({ id }) => id === focusedCellId)) focusedCellId = selection[0]?.id ?? cells[0]?.id;
-  stage.tabIndex = cells.length ? -1 : 0;
+  stage.tabIndex = cells.length && activeTab !== 'layout' ? -1 : 0;
   for (const [index, group] of [...stage.querySelectorAll('[data-cell]')].entries()) {
-    const { id, text } = cells[index];
-    group.tabIndex = id === focusedCellId ? 0 : -1;
+    const cell = cells[index];
+    const { id, text } = cell;
+    group.tabIndex = activeTab !== 'layout' && id === focusedCellId ? 0 : -1;
     group.setAttribute('role', 'button');
-    group.setAttribute('aria-label', `Block ${index + 1}${text ? `, ${text}` : ''}`);
+    group.setAttribute('aria-label', `Block ${cellAddress(cell)}${text ? `, ${text}` : ''}`);
     group.setAttribute('aria-pressed', String(selectedIds.has(id)));
   }
   oplaPreview = mountOplas(stage, poster, state.oplas, oplaTime);
   syncOplaPlayback();
   renderGuides(cells, selection);
+  renderPosterBars(stage, poster);
+  renderPosterContent(stage, state.content ?? [], poster, { interactive: activeTab === 'layout' });
   renderOplaTransform();
-  if (hadFocus && focusedCellId) focusStageCell(focusedCellId);
+  if (hadFocus && activeTab === 'layout') stage.focus({ preventScroll: true });
+  else if (hadFocus && focusedCellId) focusStageCell(focusedCellId);
 }
 
 function rulerStep(units, pixels) {
@@ -418,15 +506,36 @@ function updateSizeControls(size) {
   }
   select.value = state.preset;
   $('poster-custom-size').hidden = !state.preset.endsWith('-custom');
-  for (const label of document.querySelectorAll('.poster-size-unit')) label.textContent = size.unit;
+  for (const label of document.querySelectorAll('[data-artboard-unit]')) label.textContent = size.unit;
   const limit = sizeLimits[state.mode];
-  for (const [id, value] of [['poster-width', size.width], ['poster-height', size.height]]) {
+  for (const [id, value] of [['poster-width', state.width], ['poster-height', state.height]]) {
     const input = $(id);
     input.min = limit.min;
     input.max = limit.max;
     input.step = state.mode === 'print' ? 'any' : '1';
     if (input !== document.activeElement) input.value = value;
   }
+}
+
+function updateBarControls(size, source) {
+  for (const edge of barEdges) {
+    const bar = state.bars[edge];
+    const height = $(`poster-bar-${edge}-height`);
+    $(`poster-bar-${edge}-enabled`).checked = bar.enabled;
+    $(`poster-bar-${edge}-controls`).hidden = !bar.enabled;
+    $(`poster-bar-${edge}-mode`).value = bar.mode;
+    height.max = size.barHeightLimit;
+    if (source !== height) height.value = size.barHeights[edge];
+  }
+}
+
+function updateBackgroundControls() {
+  const { backgroundImage } = state;
+  $('poster-background-add').textContent = backgroundImage ? 'Replace image' : 'Add image';
+  $('poster-background-remove').disabled = !backgroundImage;
+  const filename = $('poster-background-name');
+  filename.hidden = !backgroundImage;
+  filename.textContent = backgroundImage?.name ?? '';
 }
 
 function refresh(source) {
@@ -436,13 +545,17 @@ function refresh(source) {
   const selection = cells.filter(({ id }) => selectedIds.has(id));
   selectedIds.clear();
   for (const { id } of selection) selectedIds.add(id);
+  renderGridLabels(size, selection[0]?.column ?? 0);
   updateCanvas(size);
   if (fontReady) renderPreview(poster, selection);
   updateSizeControls(size);
+  updateBackgroundControls();
+  updateBarControls(size, source);
   updateHistory();
 
   const text = posterText(state);
   if (source !== $('poster-text') && $('poster-text').value !== text) $('poster-text').value = text;
+  if (source !== $('poster-text-padding')) $('poster-text-padding').value = state.textPadding;
   const letterCount = graphemes(text).length;
   const placed = cells.filter((cell) => cell.text).length;
   const capacity = cells.filter((cell) => cell.block !== 'color').length;
@@ -461,20 +574,22 @@ function refresh(source) {
   updateBlockControls(cells, selection, size, source);
   updateCellEditor(selection, size);
   updateOplaControls(cells);
+  contentEditor.refresh(source);
 }
 
 function updateBlockControls(cells, selection, size, source) {
   const hasSelection = selection.length > 0;
   const single = selection.length === 1;
   const [cell] = selection;
-  const numbers = selection.slice(0, 5).map((item) => `#${cells.indexOf(item) + 1}`).join(', ');
-  $('poster-selection').textContent = !hasSelection ? 'No blocks selected' : single ? `Block ${numbers}`
-    : `${selection.length} selected · ${numbers}${selection.length > 5 ? ', …' : ''}`;
+  const addresses = selection.slice(0, 5).map(cellAddress).join(', ');
+  $('poster-selection').textContent = !hasSelection ? 'No blocks selected' : single ? `Block ${addresses}`
+    : `${selection.length} selected · ${addresses}${selection.length > 5 ? ', …' : ''}`;
   $('poster-cell').disabled = !hasSelection;
   $('poster-cell').hidden = !hasSelection;
   $('poster-single-block').hidden = !single;
   $('poster-split-cell').disabled = !single || !canSplitCell(state, cell.id);
   $('poster-merge-cell').disabled = selection.length < 2 || !canMergeCells(state, [...selectedIds]);
+  $('poster-delete-cell').disabled = !single || !canDeleteCell(state, cell.id);
   updateSwapButton(selection);
   if (!hasSelection) return;
 
@@ -497,8 +612,8 @@ function updateBlockControls(cells, selection, size, source) {
   const edges = cellEdges(cell);
   for (const [id, fraction, disabled] of [
     ['poster-column-edge', (x + width) / size.viewWidth, !edges.right],
-    ['poster-break-top', y / size.viewHeight, !edges.top],
-    ['poster-break-bottom', (y + height) / size.viewHeight, !edges.bottom],
+    ['poster-break-top', (y - size.gridY) / size.gridHeight, !edges.top],
+    ['poster-break-bottom', (y + height - size.gridY) / size.gridHeight, !edges.bottom],
   ]) {
     $(id).disabled = disabled;
     $(id).value = 100 * fraction;
@@ -545,6 +660,13 @@ function finishEdit(source) {
   updateHistory();
 }
 
+function cancelEdit(source) {
+  if (!pendingEdit || pendingEdit.source !== source) return;
+  state = pendingEdit.before;
+  pendingEdit = null;
+  refresh();
+}
+
 function apply(next, source) {
   if (next === state) return;
   if (pendingEdit?.source !== source) finishEdit();
@@ -559,6 +681,7 @@ function apply(next, source) {
 function restore(from, to) {
   finishEdit();
   if (!from.length) return;
+  backgroundImageRequest++;
   to.push(state);
   state = from.pop();
   save();
@@ -585,7 +708,7 @@ function selectedCell() {
 }
 
 function updateCellEditor(selection, size) {
-  cellEditor.hidden = selection.length !== 1 || activeTab === 'opla';
+  cellEditor.hidden = selection.length !== 1 || activeTab === 'opla' || activeTab === 'layout';
   if (cellEditor.hidden) return;
   const [{ x, y, width, height }] = selection;
   cellEditor.style.left = `${100 * x / size.viewWidth}%`;
@@ -616,13 +739,40 @@ function focusStageCell(id) {
   focusedCellId = id;
 }
 
-function moveBoundary(type, cell, position, source) {
+function rowForBoundary(type, cell) {
+  return type === 'top' ? cell.row - 1 : cell.rowEnd ?? cell.row;
+}
+
+function showRowGuide(position) {
+  stage.querySelector('.poster-smart-guide')?.remove();
+  if (position === undefined) return;
+  const { viewWidth, gridY, gridHeight } = dimensions(state);
+  const y = gridY + position * gridHeight;
+  stage.append(svg('line', {
+    class: 'poster-smart-guide', 'aria-hidden': 'true', x1: 0, y1: y, x2: viewWidth, y2: y,
+  }));
+}
+
+function moveBoundary(type, cell, position, source, { snap = false, targets } = {}) {
   if (!cell || !Number.isFinite(position)) return;
-  const { rightColumn, bottomRow } = cellEdges(cell);
-  const next = type === 'column'
-    ? moveColumnBoundary(state, rightColumn, position)
-    : moveRowBoundary(state, cell.column, type === 'top' ? cell.row - 1 : bottomRow, position);
-  apply(next, source);
+  if (type === 'column') {
+    apply(moveColumnBoundary(state, cellEdges(cell).rightColumn, position), source);
+    return;
+  }
+  const row = rowForBoundary(type, cell);
+  const transform = stage.getScreenCTM();
+  const screenHeight = transform ? dimensions(state).gridHeight * Math.hypot(transform.c, transform.d) : 0;
+  // Keep the snap area the same on screen at every zoom level.
+  let nearest = snap && screenHeight > 0 ? 6 / screenHeight : .0005;
+  let aligned;
+  for (const target of targets ?? rowBoundarySnapTargets(state, cell.column, row)) {
+    const distance = Math.abs(target - position);
+    if (distance > nearest) continue;
+    nearest = distance;
+    aligned = target;
+  }
+  apply(moveRowBoundary(state, cell.column, row, snap ? aligned ?? position : position), source);
+  showRowGuide(aligned);
 }
 
 async function exportPoster(format) {
@@ -648,6 +798,11 @@ async function exportPoster(format) {
       height: physical ? `${size.height}mm` : size.pixelHeight,
     });
     mountOplas(output, composition, poster.oplas, frameTime);
+    renderPosterBars(output, composition, { crispBlocks: true });
+    renderPosterContent(output, poster.content ?? [], composition, {
+      outline: format !== 'text',
+      allowFallbackText: format === 'png',
+    });
     const vector = new Blob([new XMLSerializer().serializeToString(output)], { type: 'image/svg+xml;charset=utf-8' });
     if (format === 'png') {
       const png = await svgToPng(vector, size.pixelWidth, size.pixelHeight);
@@ -670,12 +825,31 @@ function bindLiveInput(id, handler) {
   input.addEventListener(input.type === 'range' ? 'change' : 'blur', () => finishEdit(input));
 }
 
-bindLiveInput('poster-text', (input) => apply(setPosterText(state, input.value), input));
+bindLiveInput('poster-text', (input) => {
+  const value = input.value;
+  const next = setPosterText(state, value);
+  const copy = posterText(next);
+  if (copy !== value) {
+    const { selectionStart, selectionEnd, selectionDirection } = input;
+    input.value = copy;
+    input.setSelectionRange(
+      uppercasePosterText(value.slice(0, selectionStart)).length,
+      uppercasePosterText(value.slice(0, selectionEnd)).length,
+      selectionDirection,
+    );
+  }
+  apply(next, input);
+});
+const textPaddingInput = $('poster-text-padding');
+textPaddingInput.max = maxTextPadding;
+bindLiveInput('poster-text-padding', (input) => apply(setPosterTextPadding(state, input.valueAsNumber), input));
+textPaddingInput.addEventListener('blur', () => { textPaddingInput.value = state.textPadding; });
 bindLiveInput('poster-cell-text', (input) => {
   const cell = selectedCell();
   if (!cell) return;
-  const parts = graphemes(input.value);
-  const text = (parts[0] === cell.text ? parts[1] : parts[0]) ?? parts[0] ?? '';
+  const [first = '', second] = graphemes(input.value);
+  const firstLetter = posterCellLetter(first);
+  const text = firstLetter === cell.text && second ? posterCellLetter(second) : firstLetter;
   input.value = text;
   apply(updateCell(state, cell.id, { text }), input);
 });
@@ -757,7 +931,10 @@ $('poster-opla-phase').addEventListener('input', (event) => {
 });
 
 for (const [id, type] of [['poster-column-edge', 'column'], ['poster-break-top', 'top'], ['poster-break-bottom', 'bottom']]) {
-  bindLiveInput(id, (input) => moveBoundary(type, selectedCell(), input.valueAsNumber / 100, input));
+  bindLiveInput(id, (input) => moveBoundary(type, selectedCell(), input.valueAsNumber / 100, input, { snap: input.matches(':active') }));
+  if (type !== 'column') {
+    for (const event of ['change', 'blur', 'pointercancel']) $(id).addEventListener(event, () => showRowGuide());
+  }
 }
 
 $('poster-block-text').addEventListener('click', () => apply(setBlockRole(state, [...selectedIds], 'background')));
@@ -786,6 +963,14 @@ $('poster-merge-cell').addEventListener('click', () => {
   const aliases = new Map([...selectedIds].map((id) => [id, anchor.id]));
   apply({ ...next, oplas: readPosterOplas(next.oplas, cells, aliases) });
 });
+$('poster-delete-cell').addEventListener('click', () => {
+  const cell = selectedCell();
+  if (!cell) return;
+  const next = deleteCell(state, cell.id);
+  if (next === state) return;
+  selectedIds.clear();
+  apply(next);
+});
 $('poster-swap-colors').addEventListener('click', () => {
   const selected = posterCells(state).filter(({ id }) => selectedIds.has(id));
   let poster = state;
@@ -798,6 +983,30 @@ $('poster-swap-colors').addEventListener('click', () => {
 
 function stagePoint(event) {
   return new DOMPoint(event.clientX, event.clientY).matrixTransform(stage.getScreenCTM().inverse());
+}
+
+function cellAtPoint(point) {
+  return posterCells(state).find(({ x, y, width, height }) => (
+    point.x >= x && point.x < x + width && point.y >= y && point.y < y + height
+  ));
+}
+
+function textDropCell(event) {
+  const hit = document.elementFromPoint(event.clientX, event.clientY);
+  if (!stage.contains(hit) || hit.closest('[data-poster-bars]')) return;
+  return hit.closest('[data-cell]')?.dataset.cell ?? cellAtPoint(stagePoint(event))?.id;
+}
+
+function updateTextDrag(event) {
+  const { sourceId, startX, startY, moved } = drag;
+  if (!moved && Math.hypot(event.clientX - startX, event.clientY - startY) < 4) return;
+  drag.moved = true;
+  stage.dataset.posterDragging = 'text';
+  const target = textDropCell(event);
+  const highlighted = stage.querySelector('[data-poster-text-drop]');
+  if (highlighted?.dataset.cell === target) return;
+  highlighted?.removeAttribute('data-poster-text-drop');
+  if (target && target !== sourceId) stage.querySelector(`[data-cell="${target}"]`)?.setAttribute('data-poster-text-drop', '');
 }
 
 function dragOpla(event, point) {
@@ -852,6 +1061,16 @@ function startOplaDrag(event, type, corner) {
   stage.dataset.posterDragging = corner ? `opla-${corner}` : type;
 }
 
+function finishRowDrag(cancelled) {
+  const { pointer } = drag;
+  drag = null;
+  delete stage.dataset.posterDragging;
+  if (stage.hasPointerCapture(pointer)) stage.releasePointerCapture(pointer);
+  showRowGuide();
+  if (cancelled) cancelEdit(stage);
+  else finishEdit(stage);
+}
+
 oplaTransform.addEventListener('pointerdown', (event) => {
   if (event.button !== 0 || drag) return;
   const corner = event.target.dataset.oplaCorner;
@@ -861,11 +1080,15 @@ oplaTransform.addEventListener('pointerdown', (event) => {
 
 stage.addEventListener('pointerdown', (event) => {
   if (event.button !== 0 || drag) return;
+  if (activeTab === 'layout') {
+    contentEditor.pointerDown(event);
+    return;
+  }
   const type = event.target.closest('[data-poster-boundary]')?.dataset.posterBoundary;
   if (!type) {
     let id = event.target.closest('[data-cell]')?.dataset.cell;
     event.preventDefault();
-    const opla = activeTab === 'opla' && (event.target.closest('[data-poster-opla]')
+    const opla = activeTab === 'opla' && !event.target.closest('[data-poster-bars]') && (event.target.closest('[data-poster-opla]')
       ?? document.elementsFromPoint(event.clientX, event.clientY)
         .map((element) => element.closest('[data-poster-opla]')).find(Boolean));
     if (opla && !event.shiftKey) {
@@ -874,10 +1097,12 @@ stage.addEventListener('pointerdown', (event) => {
       return;
     }
     if (opla && !id) {
-      const point = stagePoint(event);
-      id = posterCells(state).find(({ x, y, width, height }) => (
-        point.x >= x && point.x < x + width && point.y >= y && point.y < y + height
-      ))?.id;
+      id = cellAtPoint(stagePoint(event))?.id;
+    }
+    if (activeTab === 'type' && !event.shiftKey && id && posterCells(state).some((cell) => cell.id === id && cell.text)) {
+      stage.setPointerCapture(event.pointerId);
+      drag = { type: 'text', sourceId: id, startX: event.clientX, startY: event.clientY, pointer: event.pointerId };
+      return;
     }
     selectBlock(id, event.shiftKey);
     if (id && !event.shiftKey && activeTab !== 'opla') focusCellEditor();
@@ -892,12 +1117,18 @@ stage.addEventListener('pointerdown', (event) => {
   event.preventDefault();
   finishEdit();
   stage.setPointerCapture(event.pointerId);
-  drag = { type, cell, start, pointer: event.pointerId };
+  const targets = type === 'column' ? undefined : rowBoundarySnapTargets(state, cell.column, rowForBoundary(type, cell));
+  drag = { type, cell, start, pointer: event.pointerId, targets };
+  if (targets) stage.focus({ preventScroll: true });
   stage.dataset.posterDragging = type;
 });
 stage.addEventListener('pointermove', (event) => {
   if (drag?.pointer !== event.pointerId) return;
   const { type, cell, start } = drag;
+  if (type === 'text') {
+    updateTextDrag(event);
+    return;
+  }
   const point = stagePoint(event);
   if (type.startsWith('opla-')) {
     dragOpla(event, point);
@@ -906,14 +1137,38 @@ stage.addEventListener('pointermove', (event) => {
   const size = dimensions(state);
   const position = type === 'column'
     ? (cell.x + cell.width + point.x - start.x) / size.viewWidth
-    : (cell.y + (type === 'top' ? 0 : cell.height) + point.y - start.y) / size.viewHeight;
-  moveBoundary(type, cell, position, stage);
+    : (cell.y + (type === 'top' ? 0 : cell.height) + point.y - start.y - size.gridY) / size.gridHeight;
+  moveBoundary(type, cell, position, stage, { snap: true, targets: drag.targets });
 });
 for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
   stage.addEventListener(type, (event) => {
     if (drag?.pointer !== event.pointerId) return;
+    if (drag.targets) {
+      finishRowDrag(event.type !== 'pointerup');
+      return;
+    }
+    const completed = drag;
     drag = null;
     delete stage.dataset.posterDragging;
+    if (completed.type === 'text') {
+      stage.querySelector('[data-poster-text-drop]')?.removeAttribute('data-poster-text-drop');
+      if (event.type !== 'pointerup') return;
+      if (!completed.moved) {
+        selectBlock(completed.sourceId);
+        focusCellEditor();
+        return;
+      }
+      const target = textDropCell(event);
+      const next = swapPosterBlocks(state, completed.sourceId, target);
+      if (next !== state) {
+        selectedIds.clear();
+        selectedIds.add(target);
+        focusedCellId = target;
+        apply(next);
+        focusStageCell(target);
+      }
+      return;
+    }
     finishEdit(stage);
   });
 }
@@ -944,10 +1199,15 @@ function adjacentBlock(cells, cell, key) {
 }
 
 function handleBlockKey(event) {
-  if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (activeTab === 'layout' || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
   const editing = event.currentTarget === cellEditor;
   const id = editing ? selectedCell()?.id : event.target.closest('[data-cell]')?.dataset.cell ?? focusedCellId;
   if (event.key === 'Escape') {
+    if (drag?.targets) {
+      event.preventDefault();
+      finishRowDrag(true);
+      return;
+    }
     selectBlock();
     if (editing && id) focusStageCell(id);
     return;
@@ -1000,11 +1260,15 @@ $('poster-add-column').addEventListener('click', () => apply(setColumnCount(stat
 $('poster-remove-column').addEventListener('click', () => apply(setColumnCount(state, state.columns.length - 1)));
 function shuffleGrid() {
   selectedIds.clear();
-  return randomizeLayout(state, Math.random, { keepColumns: $('poster-random-lock-columns').checked });
+  return randomizeLayout(state, Math.random, {
+    keepColumns: $('poster-random-lock-columns').checked,
+    shuffleColors: $('poster-random-shuffle-colors').checked,
+  });
 }
 $('poster-random-layout').addEventListener('click', () => {
   apply(shuffleGrid());
 });
+$('poster-reset-layout').addEventListener('click', () => apply(resetPosterLayout(state)));
 $('poster-random-text').addEventListener('click', () => {
   const poster = $('poster-random-jumble-grid').checked ? shuffleGrid() : state;
   apply(randomizeTextPositions(poster));
@@ -1031,6 +1295,40 @@ $('poster-custom-size').addEventListener('submit', (event) => {
   event.preventDefault();
   apply(setPosterSize(state, $('poster-width').valueAsNumber, $('poster-height').valueAsNumber));
 });
+const backgroundPicker = $('poster-background-file');
+$('poster-background-add').addEventListener('click', () => backgroundPicker.click());
+$('poster-background-remove').addEventListener('click', () => {
+  backgroundImageRequest++;
+  if (state.backgroundImage) apply({ ...state, backgroundImage: undefined });
+});
+backgroundPicker.addEventListener('change', async () => {
+  const [file] = backgroundPicker.files;
+  if (!file) return;
+  backgroundPicker.value = '';
+  const request = ++backgroundImageRequest;
+  const { viewWidth: width, viewHeight: height } = dimensions(state);
+  try {
+    const image = await importPosterContent(file, { width, height });
+    if (request !== backgroundImageRequest) return;
+    if (image?.type !== 'image') throw new Error('Choose a PNG, JPEG, WebP, GIF, or AVIF image.');
+    apply({ ...state, backgroundImage: { name: image.name, source: image.source } });
+    notify('Background image added.');
+  } catch (error) {
+    if (request === backgroundImageRequest) notify(error?.message ?? 'The background image could not be opened.');
+  }
+});
+for (const edge of barEdges) {
+  $(`poster-bar-${edge}-enabled`).addEventListener('change', (event) => {
+    apply(setPosterBar(state, edge, { enabled: event.currentTarget.checked }));
+  });
+  $(`poster-bar-${edge}-mode`).addEventListener('change', (event) => {
+    apply(setPosterBar(state, edge, { mode: event.currentTarget.value }));
+  });
+  const id = `poster-bar-${edge}-height`;
+  const height = $(id);
+  bindLiveInput(id, (input) => apply(setPosterBar(state, edge, { heightPx: input.valueAsNumber }), input));
+  height.addEventListener('blur', () => { height.value = dimensions(state).barHeights[edge]; });
+}
 
 function setZoom(value) {
   zoom = Math.min(2.5, Math.max(.5, value));
@@ -1042,22 +1340,34 @@ $('zoom-in').addEventListener('click', () => setZoom(zoom + .25));
 $('zoom-reset').addEventListener('click', () => setZoom(1));
 $('undo-scene').addEventListener('click', () => restore(undo, redo));
 $('redo-scene').addEventListener('click', () => restore(redo, undo));
-function resetDesign(style) {
-  selectedIds.clear();
+function resetOplaPreview() {
   activeOplaId = '';
   oplaPlaying = false;
   oplaTime = 0;
+}
+
+function resetDesign(style) {
+  selectedIds.clear();
+  backgroundImageRequest++;
+  resetOplaPreview();
+  contentEditor.reset();
   if (style === 'example') {
     apply(createPoster());
     notify('Example restored.');
   } else {
-    apply(resetPosterGrid(state, style));
+    apply({ ...resetPosterGrid(state, style), content: [], backgroundImage: undefined });
     notify('Grid reset.');
   }
 }
 $('poster-reset').addEventListener('click', (event) => {
   event.target.closest('details').open = false;
-  resetDesign('example');
+  resetDesign('accentA');
+});
+$('poster-clear-oplas').addEventListener('click', () => {
+  if (!state.oplas?.length) return;
+  resetOplaPreview();
+  apply({ ...state, oplas: [] });
+  notify('All Oplas removed.');
 });
 for (const button of document.querySelectorAll('[data-poster-reset]')) {
   button.addEventListener('click', () => resetDesign(button.dataset.posterReset));
@@ -1066,6 +1376,7 @@ for (const button of document.querySelectorAll('[data-poster-reset]')) {
 function showTab(active) {
   finishEdit();
   activeTab = active.dataset.posterTab;
+  if (activeTab === 'layout') selectedIds.clear();
   for (const button of tabButtons) {
     const selected = button === active;
     button.setAttribute('aria-selected', String(selected));
@@ -1099,7 +1410,12 @@ document.addEventListener('copy', (event) => {
   notify('Opla copied.');
 });
 document.addEventListener('paste', (event) => {
-  if (activeTab !== 'opla' || isEditingField(event) || drag) return;
+  if (isEditingField(event) || drag || contentEditor.dragging) return;
+  if (activeTab === 'layout') {
+    contentEditor.paste(event);
+    return;
+  }
+  if (activeTab !== 'opla') return;
   const text = event.clipboardData?.getData('text/plain');
   const prefix = [posterClipboardPrefix, oplaClipboardPrefix].find((start) => text?.startsWith(start));
   if (!prefix) return;
@@ -1111,7 +1427,7 @@ document.addEventListener('paste', (event) => {
   const fromOpla = prefix === oplaClipboardPrefix;
   const ids = selectedIds.size ? [...selectedIds] : !fromOpla && Array.isArray(data.cellIds) ? data.cellIds : [];
   if (!ids.length) {
-    notify('Select blocks before pasting an Opla.');
+    notify('Select color blocks before pasting an Opla.');
     return;
   }
   const source = fromOpla ? {
@@ -1127,9 +1443,14 @@ document.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
   const command = event.metaKey || event.ctrlKey;
   if (command && (key === 'z' || key === 'y')) {
+    if (contentEditor.dragging) return;
     event.preventDefault();
     if (event.shiftKey || key === 'y') restore(redo, undo);
     else restore(undo, redo);
+    return;
+  }
+  if (activeTab === 'layout') {
+    if (!document.querySelector('.action-menu[open]')) contentEditor.keyDown(event);
     return;
   }
   const placement = selectedOpla();
@@ -1157,12 +1478,35 @@ document.addEventListener('keyup', (event) => {
   if (arrowKeys.includes(event.key)) finishEdit(oplaTransform);
 });
 window.addEventListener('blur', () => finishEdit(oplaTransform));
-document.addEventListener('click', (event) => {
-  for (const menu of document.querySelectorAll('.action-menu[open]')) {
-    if (!menu.contains(event.target)) menu.open = false;
-  }
-});
 window.addEventListener('pagehide', () => { if (pendingEdit) save(); });
+
+bindActionMenus();
+bindProjectFiles({
+  filename: 'animaloop-poster.json',
+  notify,
+  invalidMessage: 'Choose a valid Poster Studio project file.',
+  getProject() {
+    finishEdit();
+    return { ...state, studio: 'poster', version: 1 };
+  },
+  openProject(data) {
+    const next = readPoster(data, { strict: true });
+    const backgroundImage = readBackgroundImage(data?.backgroundImage);
+    if (!next || (data.studio !== undefined && data.studio !== 'poster')
+      || (data.version !== undefined && data.version !== 1)
+      || (data.oplas !== undefined && !Array.isArray(data.oplas))
+      || (data.content !== undefined && !Array.isArray(data.content))
+      || (data.backgroundImage != null && !backgroundImage)) {
+      throw new Error('Invalid Poster Studio project.');
+    }
+    selectedIds.clear();
+    backgroundImageRequest++;
+    focusedCellId = undefined;
+    resetOplaPreview();
+    contentEditor.reset();
+    apply({ ...next, oplas: data.oplas ?? [], content: readPosterContent(data.content), backgroundImage });
+  },
+});
 
 for (const [format, button] of Object.entries(exportButtons)) {
   button.disabled = true;
@@ -1171,7 +1515,14 @@ for (const [format, button] of Object.entries(exportButtons)) {
 new ResizeObserver(() => {
   renderRulers();
   renderOplaTransform();
+  contentEditor.renderTransform();
 }).observe($('stage-wrap'));
+loadPalette().then((entries) => {
+  if (entries.length) contentPalette = entries.map(({ name, hex: color }) => ({ name, color }));
+  contentEditor.refresh();
+}).catch(() => {
+  // The current color scheme is available even when the shared palette cannot load.
+});
 const oplaRigPromise = loadPosterOplaRig().then((rig) => {
   oplaRig = rig;
   refresh();
