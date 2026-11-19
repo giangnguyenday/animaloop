@@ -28,13 +28,15 @@ Set the size and palette in **Artboard**. A **Background image** fills the artbo
 
 Click a block and type to replace its letter. Press Delete or Backspace to restore its accent color. In **Type**, enter copy or reshuffle the words across the grid. Horizontal padding defaults to 2% of the poster width per side, rounded to the nearest pixel. Turn off **Auto** to enter a fixed pixel value. **I width compensation** limits how far uppercase I stretches in wide blocks. Enable **Jumble grid** to randomize the layout at the same time. Spaces can move the next word to a different row.
 
+Grid letters in the same column share one font size, using the shortest occupied text block to fit. The column uses the widest fitting Google Sans Flex width/weight step from 150/1000, 125/900, 100/800, 75/700, 50/600, 25/500, and 25/400.
+
 In **Add Opla**, select one block or Shift-click connected blocks, then place up to three Oplas per block. Drag the artwork to move it, pull a corner to resize it proportionally up to 200%, or use the top handle to rotate it. Use the keyboard shortcuts from **Place** to nudge, copy, paste, duplicate, or remove. To paste an Opla from **Fry Your Opla**, select its destination blocks first.
 
 Choose a still pose or a movement cycle, adjust the fit and layer, and vary the sizes across a sequence. Pause or scrub the preview to choose a frame.
 
 In **Layout**, paste or import SVG artwork and images, or add a **Body**, **Note**, **Wide**, or **Jumble** text box. Drag a logo from **Assets** onto the artboard, or click it to add it in the center. Set a text box’s fill, padding, font size, and width. Drag a text-box corner to change the box shape while keeping the font size. Set artwork width or height in pixels to scale it proportionally. Use the alignment icons to align a single object to the artboard, or Shift-click to align several objects to each other.
 
-**Settings** controls the rulers, grid lines, workspace dots, and reading order. PNG and SVG exports capture the current frame. Print PNGs use 300 ppi, and print SVGs use millimetres. The browser remembers the poster between visits.
+**Settings** controls the rulers, grid lines, workspace dots, and reading order. PNG and SVG exports capture the current frame. PNG is available at 1×, 1.5×, 2×, and 3×. Larger print PNGs increase the resolution from 300 ppi to 450, 600, or 900 ppi while keeping the print size. Print SVGs use millimetres. Animate an Opla to enable GIF and WebM video loop exports. Mixed Opla cycles are synchronized into a seamless loop. The browser remembers the poster between visits.
 
 ## Swap assets
 

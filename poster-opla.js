@@ -1,6 +1,7 @@
 import { SVG_NS, RIG_WIDTH, RIG_HEIGHT, loadRig } from './rig.js';
 import { cycles, poses, walkAt } from './motion.js';
 import { readFrame } from './opla-frame.js';
+import { posterLoopFrameTime } from './poster-loop-timing.js';
 
 const maxOplas = 3;
 export const minPosterOplaSize = .25;
@@ -332,10 +333,11 @@ export function createPosterOplaLayers(rig, cells, placements, color) {
     }
   }
 
-  function update(seconds) {
+  function update(seconds, { loopDuration } = {}) {
     const time = Number.isFinite(seconds) ? seconds : 0;
     for (const { character, appearance, cycle, phase } of animated) {
-      const { pose, flip } = walkAt(time, cycle, phase, RIG_WIDTH, appearance.scale, false);
+      const cycleTime = loopDuration ? posterLoopFrameTime(cycle, time, loopDuration) : time;
+      const { pose, flip } = walkAt(cycleTime, cycle, phase, RIG_WIDTH, appearance.scale, false);
       character.update({ ...appearance, pose, flip });
     }
   }

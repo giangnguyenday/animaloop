@@ -5,13 +5,17 @@ export const posterContentFontFamily = fontFamily;
 const fontSize = 1000;
 const minWidth = 25;
 const maxWidth = 151;
-// Block width divided by height, calibrated to the narrow E, round O, and wide M.
-const narrowRatio = .35;
-const normalRatio = 1.11;
-const wideRatio = 2.4;
 const lightWeight = 400;
-const normalWeight = 700;
 const heavyWeight = 1000;
+const columnTypeSteps = [
+  { width: 150, weight: 1000 },
+  { width: 125, weight: 900 },
+  { width: 100, weight: 800 },
+  { width: 75, weight: 700 },
+  { width: 50, weight: 600 },
+  { width: 25, weight: 500 },
+  { width: 25, weight: 400 },
+];
 const fallbackFamily = 'sans-serif';
 
 const fontDescriptors = {
@@ -81,16 +85,6 @@ function embeddedFont() {
   const style = svg('style', {});
   style.textContent = embeddedFontStyle;
   return style;
-}
-
-function weightForAspectRatio(aspectRatio) {
-  const ratio = Math.max(narrowRatio, Math.min(wideRatio, aspectRatio));
-  if (ratio <= normalRatio) {
-    const progress = (ratio - narrowRatio) / (normalRatio - narrowRatio);
-    return Math.round(lightWeight + progress * (normalWeight - lightWeight));
-  }
-  const progress = (ratio - normalRatio) / (wideRatio - normalRatio);
-  return Math.round(normalWeight + progress * (heavyWeight - normalWeight));
 }
 
 function setGlyphVariations(width, weight) {
@@ -175,26 +169,6 @@ function glyphAtWidth(letter, width, weight) {
   return glyphCache.get(key);
 }
 
-function fitLetter(letter, targetRatio, weight) {
-  const narrowest = glyphAtWidth(letter, minWidth, weight);
-  if (!narrowest.supported || targetRatio <= narrowest.width / narrowest.height) {
-    return narrowest;
-  }
-  const widest = glyphAtWidth(letter, maxWidth, weight);
-  if (targetRatio >= widest.width / widest.height) {
-    return widest;
-  }
-  let narrow = minWidth;
-  let wide = maxWidth;
-  while (wide - narrow > .5) {
-    const middle = Math.round(narrow + wide) / 2;
-    const shape = glyphAtWidth(letter, middle, weight);
-    if (shape.width / shape.height < targetRatio) narrow = middle;
-    else wide = middle;
-  }
-  return glyphAtWidth(letter, (narrow + wide) / 2, weight);
-}
-
 function fallbackGlyph(letter, weight) {
   measureContext ??= document.createElement('canvas').getContext('2d');
   measureContext.font = `${weight} ${fontSize}px ${fallbackFamily}`;
@@ -207,38 +181,67 @@ function fallbackGlyph(letter, weight) {
   };
 }
 
-function drawLetter(cell, color, padding, outline, allowFallbackText, iWidthCompensation = 0) {
-  const letter = cell.text.normalize('NFC');
-  // A very narrow block still needs room for a letter when the requested padding exceeds its width.
-  let targetWidth = Math.max(cell.width * .1, cell.width - 2 * padding);
-  const targetHeight = cell.height * .98;
-  const weight = weightForAspectRatio(cell.width / cell.height);
-  if (letter === 'I' && iWidthCompensation > 0) {
-    const natural = glyphAtWidth(letter, 100, weight);
-    if (natural.supported && natural.height > 0) {
-      const naturalWidth = targetHeight * natural.width / natural.height;
-      targetWidth -= Math.max(0, targetWidth - naturalWidth) * iWidthCompensation / 100;
-    }
+function columnKey(cell) {
+  if (Number.isInteger(cell.column)) return `${cell.column}:${cell.columnEnd ?? cell.column}`;
+  return `${cell.x.toPrecision(12)}:${cell.width.toPrecision(12)}`;
+}
+
+function availableLetterWidth(cell, padding) {
+  return Math.max(cell.width * .1, cell.width - 2 * padding);
+}
+
+function columnTypography(cells, padding) {
+  const columns = new Map();
+  for (const cell of cells) {
+    if (!cell.text?.trim()) continue;
+    const key = columnKey(cell);
+    if (!columns.has(key)) columns.set(key, []);
+    columns.get(key).push(cell);
   }
-  const fit = fitLetter(letter, targetWidth / targetHeight, weight);
-  const { supported } = fit;
+
+  const typography = new Map();
+  for (const [key, column] of columns) {
+    let chosen;
+    for (const step of columnTypeSteps) {
+      const measurements = column.map((cell) => {
+        const shaped = glyphAtWidth(cell.text.normalize('NFC'), step.width, step.weight);
+        const glyph = shaped.supported ? shaped : fallbackGlyph(cell.text, step.weight);
+        return { cell, glyph };
+      }).filter(({ glyph }) => glyph.width > 0 && glyph.height > 0 && Number.isFinite(glyph.width + glyph.height));
+      const heightScale = Math.min(...measurements.map(({ cell, glyph }) => cell.height * .98 / glyph.height));
+      const widthScale = Math.min(...measurements.map(({ cell, glyph }) => availableLetterWidth(cell, padding) / glyph.width));
+      chosen = { ...step, scale: Math.min(heightScale, widthScale) };
+      if (heightScale <= widthScale) break;
+    }
+    typography.set(key, chosen);
+  }
+  return typography;
+}
+
+function drawLetter(cell, color, padding, outline, allowFallbackText, typography, iWidthCompensation = 0) {
+  const letter = cell.text.normalize('NFC');
+  const { width: variationWidth, weight, scale: scaleY } = typography;
+  const shaped = glyphAtWidth(letter, variationWidth, weight);
+  const { supported } = shaped;
   if (outline && !supported && !allowFallbackText) {
     throw new Error(`Google Sans Flex does not include “${cell.text}”. Choose SVG with editable text to keep this character.`);
   }
-  const glyph = supported ? fit : fallbackGlyph(letter, weight);
-  if (!(glyph.width > 0 && glyph.height > 0)) return;
+  const glyph = supported ? shaped : fallbackGlyph(letter, weight);
+  if (!(glyph.width > 0 && glyph.height > 0 && Number.isFinite(scaleY))) return;
 
-  const scaleY = targetHeight / glyph.height;
-  const naturalWidth = glyph.width * scaleY;
-  // Extend the width range only once the native axis reaches its limit.
-  const atWidthLimit = glyph.variationWidth === minWidth || glyph.variationWidth === maxWidth;
-  const scaleX = !supported || atWidthLimit || naturalWidth > targetWidth ? targetWidth / glyph.width : scaleY;
+  let scaleX = scaleY;
+  if (letter === 'I') {
+    const fullWidth = availableLetterWidth(cell, padding);
+    const naturalWidth = glyph.width * scaleY;
+    const compensation = Math.max(0, Math.min(100, iWidthCompensation)) / 100;
+    scaleX = (fullWidth - Math.max(0, fullWidth - naturalWidth) * compensation) / glyph.width;
+  }
   const x = cell.x + (cell.width - glyph.width * scaleX) / 2 - glyph.x * scaleX;
-  const y = cell.y + (cell.height - targetHeight) / 2 - glyph.y * scaleY;
+  const y = cell.y + (cell.height - glyph.height * scaleY) / 2 - glyph.y * scaleY;
   const attributes = { fill: color, transform: `translate(${x} ${y}) scale(${scaleX} ${scaleY})` };
 
   if (outline && supported) {
-    setGlyphVariations(glyph.variationWidth, weight);
+    setGlyphVariations(variationWidth, weight);
     const outlines = svg('g', {
       fill: color,
       transform: `translate(${x} ${y}) scale(${scaleX} ${-scaleY})`,
@@ -257,7 +260,7 @@ function drawLetter(cell, color, padding, outline, allowFallbackText, iWidthComp
     'font-weight': weight,
   });
   if (supported) {
-    text.setAttribute('style', `font-variation-settings: 'wdth' ${glyph.variationWidth}, 'wght' ${weight}; font-optical-sizing: none;`);
+    text.setAttribute('style', `font-variation-settings: 'wdth' ${variationWidth}, 'wght' ${weight}; font-optical-sizing: none;`);
   }
   text.textContent = cell.text;
   return text;
@@ -277,6 +280,7 @@ export function renderPoster(stage, layout, {
   stage.setAttribute('height', height);
 
   const padding = layout.textPaddingPx;
+  const typography = columnTypography(layout.cells, padding);
   const content = document.createDocumentFragment();
   if (embedFont && !outline) content.append(embeddedFont());
   content.append(svg('rect', { width: layout.width, height: layout.height, fill: layout.background }));
@@ -304,7 +308,8 @@ export function renderPoster(stage, layout, {
       ...(crispBlocks && { 'shape-rendering': 'crispEdges' }),
     }));
     if (cell.text?.trim()) {
-      const letter = drawLetter(cell, layout.textColor, padding, outline, allowFallbackText, layout.iWidthCompensation);
+      const letter = drawLetter(cell, layout.textColor, padding, outline, allowFallbackText,
+        typography.get(columnKey(cell)), layout.iWidthCompensation);
       if (letter) group.append(letter);
     }
     content.append(group);

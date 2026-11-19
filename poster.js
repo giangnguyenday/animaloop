@@ -8,9 +8,11 @@ import {
   splitCell, canSplitCell, mergeCells, canMergeCells, deleteCell, canDeleteCell, updateCell, setBlockRole, swapPosterBlocks,
   randomizeLayout, resetPosterLayout, randomizeTextPositions, clearTextBlocks,
 } from './poster-model.js?v=i-width';
-import { loadPosterFont, renderPoster, renderPosterBars } from './poster-render.js?v=i-width';
-import { importPosterContent, readPosterContent, renderPosterContent } from './poster-content.js?v=i-width';
-import { bindPosterContent } from './poster-content-editor.js?v=i-width';
+import { loadPosterFont, renderPoster, renderPosterBars } from './poster-render.js?v=column-type-exports';
+import { importPosterContent, readPosterContent, renderPosterContent } from './poster-content.js?v=column-type-exports';
+import { bindPosterContent } from './poster-content-editor.js?v=column-type-exports';
+import { exportPosterLoop } from './poster-animation-export.js';
+import { posterLoopDuration } from './poster-loop-timing.js';
 import { loadPalette } from './palette.js';
 import { loadPosterDraft, savePosterDraft } from './poster-storage.js';
 import { download, setPngDensity, svgToPng } from './image-export.js';
@@ -20,7 +22,7 @@ import {
   loadPosterOplaRig, readPosterOplas, createPosterOpla, updatePosterOpla, posterOplaCapacity,
   createPosterOplaLayers, mountPosterOplaLayers, duplicatePosterOpla, minPosterOplaSize, maxPosterOplaSize,
   shufflePosterOplaCapacity, shufflePosterOplas,
-} from './poster-opla.js?v=type-blocks';
+} from './poster-opla.js?v=column-type-exports';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -28,7 +30,18 @@ const oplaTransform = $('poster-opla-transform');
 const svgNamespace = 'http://www.w3.org/2000/svg';
 const storageKey = 'animaloop-poster-v1';
 const viewKey = 'animaloop-poster-view-v1';
-const exportButtons = { png: $('export-png'), outline: $('export-svg-outline'), text: $('export-svg-text') };
+const exportButtons = {
+  png: $('export-png'),
+  'png-1-5': $('export-png-1-5'),
+  'png-2': $('export-png-2'),
+  'png-3': $('export-png-3'),
+  outline: $('export-svg-outline'),
+  text: $('export-svg-text'),
+  gif: $('export-gif'),
+  video: $('export-video'),
+};
+const pngScales = { png: 1, 'png-1-5': 1.5, 'png-2': 2, 'png-3': 3 };
+const animatedExports = new Set(['gif', 'video']);
 const undo = [];
 const redo = [];
 const selectedIds = new Set();
@@ -68,6 +81,7 @@ let focusedCellId;
 let activeTab = 'artboard';
 let zoom = 1;
 let fontReady = false;
+let exportJob;
 let pendingEdit;
 let backgroundImageRequest = 0;
 let drag;
@@ -497,6 +511,15 @@ function updateHistory() {
   $('redo-scene').disabled = !!edited || !redo.length;
 }
 
+function updateExportButtons() {
+  const animated = state.oplas?.some(({ mode }) => mode === 'animate');
+  for (const [format, button] of Object.entries(exportButtons)) {
+    button.disabled = !fontReady || !!exportJob || (animatedExports.has(format) && !animated);
+    button.title = animatedExports.has(format) && !animated ? 'Animate an Opla to export a loop.' : '';
+  }
+  $('export-cancel').hidden = !exportJob;
+}
+
 function updateSizeControls(size) {
   $('poster-size-mode').value = state.mode;
   const select = $('poster-size');
@@ -554,6 +577,7 @@ function refresh(source) {
   updateBackgroundControls();
   updateBarControls(size, source);
   updateHistory();
+  updateExportButtons();
 
   const text = posterText(state);
   if (source !== $('poster-text') && $('poster-text').value !== text) $('poster-text').value = text;
@@ -783,45 +807,75 @@ function moveBoundary(type, cell, position, source, { snap = false, targets } = 
 }
 
 async function exportPoster(format) {
+  if (!fontReady || exportJob) return;
   finishEdit();
   const poster = state;
   const frameTime = oplaTime;
   const size = dimensions(poster);
+  const animated = animatedExports.has(format);
+  const pngScale = pngScales[format];
+  const pixels = animated || !!pngScale;
   const button = exportButtons[format];
   button.closest('details').open = false;
-  button.disabled = true;
+  const controller = new AbortController();
+  exportJob = controller;
+  updateExportButtons();
   try {
     if (poster.oplas?.length) await oplaRigPromise;
     if (poster.oplas?.length && !oplaRig) throw new Error('Opla artwork is unavailable.');
-    const physical = size.unit === 'mm' && format !== 'png';
+    const physical = size.unit === 'mm' && !pixels;
     const output = svg('svg', {});
     const composition = layout(poster);
     renderPoster(output, composition, {
       outline: format !== 'text',
       embedFont: format === 'text',
-      allowFallbackText: format === 'png',
+      allowFallbackText: pixels,
       crispBlocks: true,
       width: physical ? `${size.width}mm` : size.pixelWidth,
       height: physical ? `${size.height}mm` : size.pixelHeight,
     });
-    mountOplas(output, composition, poster.oplas, frameTime);
+    const layers = mountOplas(output, composition, poster.oplas, frameTime);
     renderPosterBars(output, composition, { crispBlocks: true });
     renderPosterContent(output, poster.content ?? [], composition, {
       outline: format !== 'text',
-      allowFallbackText: format === 'png',
+      allowFallbackText: pixels,
     });
-    const vector = new Blob([new XMLSerializer().serializeToString(output)], { type: 'image/svg+xml;charset=utf-8' });
-    if (format === 'png') {
-      const png = await svgToPng(vector, size.pixelWidth, size.pixelHeight);
-      download(size.unit === 'mm' ? await setPngDensity(png, printPpi) : png, 'animaloop-poster.png');
+    const serialize = () => new Blob([new XMLSerializer().serializeToString(output)], { type: 'image/svg+xml;charset=utf-8' });
+    if (animated) {
+      if (!layers?.animated) throw new Error('Animate an Opla to export a loop.');
+      const duration = posterLoopDuration(poster.oplas);
+      const loop = await exportPosterLoop({
+        format,
+        width: size.pixelWidth,
+        height: size.pixelHeight,
+        duration,
+        signal: controller.signal,
+        renderFrame(seconds) {
+          layers.update(seconds, { loopDuration: duration });
+          return serialize();
+        },
+        onProgress(progress) {
+          notify(`Exporting ${format === 'gif' ? 'GIF' : 'video'} · ${Math.round(progress * 100)}%`, 0);
+        },
+      });
+      controller.signal.throwIfAborted();
+      const extension = format === 'gif' ? 'gif' : loop.type.startsWith('video/mp4') ? 'mp4' : 'webm';
+      download(loop, `animaloop-poster-loop.${extension}`);
+    } else if (pngScale) {
+      const png = await svgToPng(serialize(), Math.round(size.pixelWidth * pngScale), Math.round(size.pixelHeight * pngScale));
+      controller.signal.throwIfAborted();
+      const suffix = pngScale === 1 ? '' : `@${pngScale}x`;
+      download(size.unit === 'mm' ? await setPngDensity(png, printPpi * pngScale) : png, `animaloop-poster${suffix}.png`);
     } else {
-      download(vector, `animaloop-poster-${format === 'text' ? 'text' : 'outlines'}.svg`);
+      controller.signal.throwIfAborted();
+      download(serialize(), `animaloop-poster-${format === 'text' ? 'text' : 'outlines'}.svg`);
     }
-    notify(format === 'png' ? 'PNG exported.' : 'SVG exported.');
+    notify(animated ? `${format === 'gif' ? 'GIF' : 'Video'} loop exported.` : pngScale ? 'PNG exported.' : 'SVG exported.');
   } catch (error) {
-    notify(error?.message ? `Export failed. ${error.message}` : 'Export failed.');
+    notify(controller.signal.aborted ? 'Export canceled.' : error?.message ? `Export failed. ${error.message}` : 'Export failed.');
   } finally {
-    button.disabled = false;
+    exportJob = undefined;
+    updateExportButtons();
   }
 }
 
@@ -1527,6 +1581,10 @@ for (const [format, button] of Object.entries(exportButtons)) {
   button.disabled = true;
   button.addEventListener('click', () => exportPoster(format));
 }
+$('export-cancel').addEventListener('click', () => {
+  $('export-cancel').closest('details').open = false;
+  exportJob?.abort();
+});
 new ResizeObserver(() => {
   renderRulers();
   renderOplaTransform();
@@ -1549,7 +1607,6 @@ const oplaRigPromise = loadPosterOplaRig().then((rig) => {
 refresh();
 loadPosterFont().then(() => {
   fontReady = true;
-  for (const button of Object.values(exportButtons)) button.disabled = false;
   refresh();
 }).catch((error) => {
   notify('The poster font could not load. Reload the page to try again.', 0);

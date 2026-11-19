@@ -33,9 +33,21 @@
       <details class="action-menu">
         <summary class="button primary">Export <svg class="action-icon" width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 9 9 3M4.5 3H9v4.5"/></svg></summary>
         <div class="menu-content">
-          <button type="button" id="export-png">Download PNG</button>
-          <button type="button" id="export-svg-outline">Download SVG with outlines</button>
-          <button type="button" id="export-svg-text">Download SVG with editable text</button>
+          <div class="menu-section">
+            <button type="button" id="export-png">PNG · 1×</button>
+            <button type="button" id="export-png-1-5">PNG · 1.5×</button>
+            <button type="button" id="export-png-2">PNG · 2×</button>
+            <button type="button" id="export-png-3">PNG · 3×</button>
+          </div>
+          <div class="menu-section">
+            <button type="button" id="export-svg-outline">SVG · Outlines</button>
+            <button type="button" id="export-svg-text">SVG · Editable text</button>
+          </div>
+          <div class="menu-section">
+            <button type="button" id="export-gif" disabled>GIF loop</button>
+            <button type="button" id="export-video" disabled>Video loop · WebM</button>
+          </div>
+          <button type="button" id="export-cancel" hidden>Cancel export</button>
         </div>
       </details>
     </div>
@@ -564,6 +576,6 @@
       </section>
     </aside>
   </main>
-  <script type="module" src="./poster.js?v=i-width"></script>
+  <script type="module" src="./poster.js?v=column-type-exports"></script>
 </body>
 </html>
