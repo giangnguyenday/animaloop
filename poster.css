@@ -38,6 +38,7 @@
 .poster-row-label { right: 100%; width: var(--poster-axis-size); transform: translateY(-50%); }
 
 .poster-editor #stage [data-cell] { cursor: pointer; }
+.poster-editor #stage [data-poster-movable] { cursor: grab; }
 .poster-editor #stage [data-cell] > :not(rect) { pointer-events: none; }
 .poster-editor #stage [data-cell] > rect { pointer-events: all; }
 .poster-editor #stage[data-mode="opla"] [data-poster-opla] { pointer-events: visiblePainted; cursor: grab; }
@@ -88,6 +89,8 @@
 #stage:is([data-poster-dragging="opla-nw"], [data-poster-dragging="opla-se"]) { cursor: nwse-resize; }
 #stage:is([data-poster-dragging="opla-ne"], [data-poster-dragging="opla-sw"]) { cursor: nesw-resize; }
 #stage:is([data-poster-dragging="opla-move"], [data-poster-dragging="opla-rotate"]) { cursor: grabbing; }
+.poster-editor #stage[data-poster-dragging="block-move"],
+.poster-editor #stage[data-poster-dragging="block-move"] [data-cell] { cursor: grabbing; }
 
 .poster-editor .tabs .poster-tab-line-icon { fill: none; }
 

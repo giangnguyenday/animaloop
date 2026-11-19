@@ -220,16 +220,17 @@ function columnTypography(cells, padding) {
 
 function drawLetter(cell, color, padding, outline, allowFallbackText, typography, iWidthCompensation = 0) {
   const letter = cell.text.normalize('NFC');
-  const { width: variationWidth, weight, scale: scaleY } = typography;
+  const { width: variationWidth, weight, scale: columnScale } = typography;
   const shaped = glyphAtWidth(letter, variationWidth, weight);
   const { supported } = shaped;
   if (outline && !supported && !allowFallbackText) {
     throw new Error(`Google Sans Flex does not include “${cell.text}”. Choose SVG with editable text to keep this character.`);
   }
   const glyph = supported ? shaped : fallbackGlyph(letter, weight);
-  if (!(glyph.width > 0 && glyph.height > 0 && Number.isFinite(scaleY))) return;
+  if (!(glyph.width > 0 && glyph.height > 0 && Number.isFinite(columnScale))) return;
 
-  let scaleX = scaleY;
+  const scaleY = cell.height * .98 / glyph.height;
+  let scaleX = columnScale;
   if (letter === 'I') {
     const fullWidth = availableLetterWidth(cell, padding);
     const naturalWidth = glyph.width * scaleY;

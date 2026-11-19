@@ -6,7 +6,7 @@
   <meta name="description" content="Make an ANIMALOOP poster with a staggered grid and variable lettering.">
   <title>ANIMALOOP — Cook Your Poster</title>
   <link rel="stylesheet" href="./styles.css?v=grid-labels">
-  <link rel="stylesheet" href="./poster.css?v=i-width">
+  <link rel="stylesheet" href="./poster.css?v=linked-block-heights">
 </head>
 <body class="poster-editor">
   <header class="topbar">
@@ -236,7 +236,8 @@
         </div>
         <div class="control-section">
           <div class="section-title"><h2 id="poster-block-title">Block</h2><output id="poster-selection" aria-live="polite">None selected</output></div>
-          <p class="control-note">Click a block and type. Delete clears it. Shift-click to select more.</p>
+          <p class="control-note">Click a block and type. Drag a selected block to move it up or down. Shift-click to select more.</p>
+          <label class="checkbox-field"><input type="checkbox" id="poster-link-text-heights" checked> Link text block heights</label>
           <fieldset class="poster-cell-fields" id="poster-cell" aria-labelledby="poster-block-title" hidden disabled>
             <div class="poster-block-types" role="group" aria-label="Block type">
               <button type="button" class="button" id="poster-block-text" aria-pressed="false">Text</button>
@@ -264,6 +265,10 @@
                   <input type="range" id="poster-break-bottom" min="0" max="100" step=".1">
                 </label>
               </div>
+              <label class="field">
+                <span class="value-row">Vertical position <output id="poster-block-position-value" for="poster-block-position"></output></span>
+                <input type="range" id="poster-block-position" min="0" max="100" step=".1">
+              </label>
             </div>
           </fieldset>
         </div>
@@ -576,6 +581,6 @@
       </section>
     </aside>
   </main>
-  <script type="module" src="./poster.js?v=column-type-exports"></script>
+  <script type="module" src="./poster.js?v=linked-block-heights"></script>
 </body>
 </html>

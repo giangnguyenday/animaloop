@@ -5,12 +5,13 @@ import {
   posterTextPaddingPixels, maxPosterTextPadding, setPosterTextPadding, setPosterIWidthCompensation,
   setPosterBar,
   maxColumns, setColumnCount, moveColumnBoundary, moveRowBoundary, canMoveRowBoundary, rowBoundarySnapTargets,
+  normalizeTextBlockHeights, resizeTextBlock, textBlockBoundaryRange, moveBlockVertically, blockVerticalRange, canMoveBlockVertically,
   splitCell, canSplitCell, mergeCells, canMergeCells, deleteCell, canDeleteCell, updateCell, setBlockRole, swapPosterBlocks,
   randomizeLayout, resetPosterLayout, randomizeTextPositions, clearTextBlocks,
-} from './poster-model.js?v=i-width';
-import { loadPosterFont, renderPoster, renderPosterBars } from './poster-render.js?v=column-type-exports';
-import { importPosterContent, readPosterContent, renderPosterContent } from './poster-content.js?v=column-type-exports';
-import { bindPosterContent } from './poster-content-editor.js?v=column-type-exports';
+} from './poster-model.js?v=linked-block-heights';
+import { loadPosterFont, renderPoster, renderPosterBars } from './poster-render.js?v=cell-height-fit';
+import { importPosterContent, readPosterContent, renderPosterContent } from './poster-content.js?v=cell-height-fit';
+import { bindPosterContent } from './poster-content-editor.js?v=cell-height-fit';
 import { exportPosterLoop } from './poster-animation-export.js';
 import { posterLoopDuration } from './poster-loop-timing.js';
 import { loadPalette } from './palette.js';
@@ -56,6 +57,7 @@ const barEdges = ['top', 'bottom'];
 const editorOptions = [
   'poster-ruler', 'poster-guides', 'poster-show-coordinates', 'poster-workspace-dots', 'poster-show-text-order',
   'poster-random-lock-columns', 'poster-random-shuffle-colors', 'poster-random-jumble-grid',
+  'poster-link-text-heights',
 ];
 let state = createPoster();
 let contentPalette;
@@ -76,6 +78,11 @@ try {
   const view = JSON.parse(localStorage.getItem(viewKey));
   for (const id of editorOptions) if (typeof view?.[id] === 'boolean') $(id).checked = view[id];
 } catch { /* Use the default view settings. */ }
+if ($('poster-link-text-heights').checked) {
+  const normalized = normalizeTextBlockHeights(state);
+  state = normalized !== state && normalized.oplas?.length
+    ? { ...normalized, oplas: readPosterOplas(normalized.oplas, posterCells(normalized)) } : normalized;
+}
 
 let focusedCellId;
 let activeTab = 'artboard';
@@ -443,6 +450,8 @@ function renderPreview(poster, selection) {
     group.setAttribute('role', 'button');
     group.setAttribute('aria-label', `Block ${cellAddress(cell)}${text ? `, ${text}` : ''}`);
     group.setAttribute('aria-pressed', String(selectedIds.has(id)));
+    group.toggleAttribute('data-poster-movable', selectedIds.size === 1 && selectedIds.has(id)
+      && activeTab !== 'type' && activeTab !== 'opla' && activeTab !== 'layout' && canMoveBlockVertically(state, id));
   }
   oplaPreview = mountOplas(stage, poster, state.oplas, oplaTime);
   syncOplaPlayback();
@@ -646,10 +655,21 @@ function updateBlockControls(cells, selection, size, source) {
     ['poster-break-top', (y - size.gridY) / size.gridHeight, !edges.top],
     ['poster-break-bottom', (y + height - size.gridY) / size.gridHeight, !edges.bottom],
   ]) {
-    $(id).disabled = disabled;
+    const edge = id === 'poster-break-top' ? 'top' : id === 'poster-break-bottom' ? 'bottom' : undefined;
+    const linkedRange = edge && isTextBlock(cell) && $('poster-link-text-heights').checked
+      ? textBlockBoundaryRange(state, cell.id, edge) : undefined;
+    $(id).disabled = disabled || linkedRange === null || (linkedRange && linkedRange.max - linkedRange.min < 1e-8);
     $(id).value = 100 * fraction;
     $(`${id}-value`).textContent = `${+(100 * fraction).toFixed(1)}%`;
   }
+  const center = (y + height / 2 - size.gridY) / size.gridHeight;
+  const range = blockVerticalRange(state, cell.id);
+  const positionInput = $('poster-block-position');
+  positionInput.min = 100 * (center + range.min);
+  positionInput.max = 100 * (center + range.max);
+  positionInput.disabled = range.max - range.min < 1e-8;
+  positionInput.value = 100 * center;
+  $('poster-block-position-value').textContent = `${+(100 * center).toFixed(1)}%`;
 }
 
 function isTextBlock({ text, block }) {
@@ -700,6 +720,7 @@ function cancelEdit(source) {
 
 function apply(next, source) {
   if (next === state) return;
+  if ($('poster-link-text-heights').checked && textBlockMembershipChanged(state, next)) next = normalizeTextBlockHeights(next);
   if (pendingEdit?.source !== source) finishEdit();
   const previous = state;
   if (source && !pendingEdit) pendingEdit = { source, before: previous };
@@ -707,6 +728,15 @@ function apply(next, source) {
     ? { ...next, oplas: readPosterOplas(next.oplas, posterCells(next)) } : next;
   if (!source) record(previous);
   refresh(source);
+}
+
+function textBlockMembershipChanged(previous, next) {
+  if (previous.columns === next.columns) return false;
+  return previous.columns.length !== next.columns.length || next.columns.some(({ cells }, column) => {
+    const before = previous.columns[column].cells;
+    return cells.length !== before.length || cells.some((cell, row) => cell.id !== before[row].id
+      || cell.join !== before[row].join || isTextBlock(cell) !== isTextBlock(before[row]));
+  });
 }
 
 function restore(from, to) {
@@ -786,8 +816,13 @@ function showRowGuide(position) {
 
 function moveBoundary(type, cell, position, source, { snap = false, targets } = {}) {
   if (!cell || !Number.isFinite(position)) return;
+  const basis = source === stage && drag?.originalState ? drag.originalState
+    : pendingEdit?.source === source ? pendingEdit.before : state;
+  const cells = posterCells(basis);
+  cell = cells.find(({ id }) => id === cell.id);
+  if (!cell) return;
   if (type === 'column') {
-    apply(moveColumnBoundary(state, cellEdges(cell).rightColumn, position), source);
+    apply(moveColumnBoundary(basis, cellEdges(cell).rightColumn, position), source);
     return;
   }
   const row = rowForBoundary(type, cell);
@@ -796,14 +831,36 @@ function moveBoundary(type, cell, position, source, { snap = false, targets } = 
   // Keep the snap area the same on screen at every zoom level.
   let nearest = snap && screenHeight > 0 ? 6 / screenHeight : .0005;
   let aligned;
-  for (const target of targets ?? rowBoundarySnapTargets(state, cell.column, row)) {
+  for (const target of targets ?? rowBoundarySnapTargets(basis, cell.column, row)) {
     const distance = Math.abs(target - position);
     if (distance > nearest) continue;
     nearest = distance;
     aligned = target;
   }
-  apply(moveRowBoundary(state, cell.column, row, snap ? aligned ?? position : position), source);
-  showRowGuide(aligned);
+  const requested = snap ? aligned ?? position : position;
+  const neighbors = basis.columns[cell.column].cells;
+  const above = neighbors[row];
+  const below = neighbors[row + 1];
+  const linked = $('poster-link-text-heights').checked;
+  const textTarget = isTextBlock(cell) ? { cell, edge: type }
+    : [[above, 'bottom'], [below, 'top']].map(([item, edge]) => ({
+      cell: item && cells.find(({ id }) => id === (item.join ?? item.id)), edge,
+    })).find((target) => target.cell && isTextBlock(target.cell));
+  const next = linked && textTarget
+    ? resizeTextBlock(basis, textTarget.cell.id, textTarget.edge, requested)
+    : moveRowBoundary(basis, cell.column, row, requested);
+  apply(next, source);
+  const actual = state.columns[cell.column].cells[row]?.bottom;
+  showRowGuide(aligned !== undefined && Math.abs(actual - aligned) < 1e-8 ? aligned : undefined);
+}
+
+function moveSelectedBlock(position, source) {
+  const basis = pendingEdit?.source === source ? pendingEdit.before : state;
+  const cell = posterCells(basis).find(({ id }) => selectedIds.has(id));
+  if (!cell) return;
+  const { gridY, gridHeight } = dimensions(basis);
+  const center = (cell.y + cell.height / 2 - gridY) / gridHeight;
+  apply(moveBlockVertically(basis, cell.id, position - center), source);
 }
 
 async function exportPoster(format) {
@@ -1005,6 +1062,7 @@ for (const [id, type] of [['poster-column-edge', 'column'], ['poster-break-top',
     for (const event of ['change', 'blur', 'pointercancel']) $(id).addEventListener(event, () => showRowGuide());
   }
 }
+bindLiveInput('poster-block-position', (input) => moveSelectedBlock(input.valueAsNumber / 100, input));
 
 $('poster-block-text').addEventListener('click', () => apply(setBlockRole(state, [...selectedIds], 'background')));
 $('poster-block-color').addEventListener('click', () => {
@@ -1173,6 +1231,17 @@ stage.addEventListener('pointerdown', (event) => {
       drag = { type: 'text', sourceId: id, startX: event.clientX, startY: event.clientY, pointer: event.pointerId };
       return;
     }
+    if (id && !event.shiftKey && activeTab !== 'opla' && selectedIds.size === 1 && selectedIds.has(id)
+      && canMoveBlockVertically(state, id)) {
+      finishEdit();
+      stage.focus({ preventScroll: true });
+      stage.setPointerCapture(event.pointerId);
+      drag = {
+        type: 'block-move', cell: selectedCell(), start: stagePoint(event),
+        startX: event.clientX, startY: event.clientY, pointer: event.pointerId, originalState: state,
+      };
+      return;
+    }
     selectBlock(id, event.shiftKey);
     if (id && !event.shiftKey && activeTab !== 'opla') focusCellEditor();
     else if (id) focusStageCell(id);
@@ -1187,7 +1256,7 @@ stage.addEventListener('pointerdown', (event) => {
   finishEdit();
   stage.setPointerCapture(event.pointerId);
   const targets = type === 'column' ? undefined : rowBoundarySnapTargets(state, cell.column, rowForBoundary(type, cell));
-  drag = { type, cell, start, pointer: event.pointerId, targets };
+  drag = { type, cell, start, pointer: event.pointerId, targets, originalState: state };
   if (targets) stage.focus({ preventScroll: true });
   stage.dataset.posterDragging = type;
 });
@@ -1199,6 +1268,13 @@ stage.addEventListener('pointermove', (event) => {
     return;
   }
   const point = stagePoint(event);
+  if (type === 'block-move') {
+    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 3) return;
+    drag.moved = true;
+    stage.dataset.posterDragging = 'block-move';
+    apply(moveBlockVertically(drag.originalState, cell.id, (point.y - start.y) / dimensions(drag.originalState).gridHeight), stage);
+    return;
+  }
   if (type.startsWith('opla-')) {
     dragOpla(event, point);
     return;
@@ -1212,8 +1288,10 @@ stage.addEventListener('pointermove', (event) => {
 for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
   stage.addEventListener(type, (event) => {
     if (drag?.pointer !== event.pointerId) return;
-    if (drag.targets) {
+    if (drag.targets || drag.type === 'block-move') {
+      const clickOnly = drag.type === 'block-move' && !drag.moved && event.type === 'pointerup';
       finishRowDrag(event.type !== 'pointerup');
+      if (clickOnly) focusCellEditor();
       return;
     }
     const completed = drag;
@@ -1272,7 +1350,7 @@ function handleBlockKey(event) {
   const editing = event.currentTarget === cellEditor;
   const id = editing ? selectedCell()?.id : event.target.closest('[data-cell]')?.dataset.cell ?? focusedCellId;
   if (event.key === 'Escape') {
-    if (drag?.targets) {
+    if (drag?.targets || drag?.type === 'block-move') {
       event.preventDefault();
       finishRowDrag(true);
       return;
@@ -1332,6 +1410,7 @@ function shuffleGrid() {
   return randomizeLayout(state, Math.random, {
     keepColumns: $('poster-random-lock-columns').checked,
     shuffleColors: $('poster-random-shuffle-colors').checked,
+    linkTextHeights: $('poster-link-text-heights').checked,
   });
 }
 $('poster-random-layout').addEventListener('click', () => {
@@ -1345,6 +1424,7 @@ $('poster-random-text').addEventListener('click', () => {
 $('poster-remove-text').addEventListener('click', () => apply(clearTextBlocks(state)));
 for (const id of editorOptions) {
   $(id).addEventListener('change', () => {
+    if (id === 'poster-link-text-heights' && $(id).checked) apply(normalizeTextBlockHeights(state));
     try {
       const view = Object.fromEntries(editorOptions.map((option) => [option, $(option).checked]));
       localStorage.setItem(viewKey, JSON.stringify(view));

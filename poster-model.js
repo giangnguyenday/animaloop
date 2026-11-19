@@ -581,6 +581,408 @@ export function moveRowBoundary(state, column, row, position) {
   return replaceBoundaries(state, edges, bottom);
 }
 
+function textGeometry(state) {
+  const anchors = new Map(posterCells(state).map((cell) => [cell.id, cell]));
+  const merged = new Set(state.columns.flatMap(({ cells }) => cells.map(({ join }) => join).filter(Boolean)));
+  return state.columns.map(({ cells }) => cells.map((cell, row) => ({
+    ...cell, row, top: cells[row - 1]?.bottom ?? 0,
+    isText: !!(anchors.get(cell.join ?? cell.id)?.text || anchors.get(cell.join ?? cell.id)?.block === 'text'),
+    merged: !!cell.join || merged.has(cell.id),
+  })));
+}
+
+function textColumnProfile(rows) {
+  // Color merge edges stay fixed. Text merge edges are shared anchors solved below.
+  const edges = new Set([0, rows.length]);
+  rows.forEach((cell, row) => { if (cell.merged && !cell.isText) { edges.add(row); edges.add(row + 1); } });
+  const stops = [...edges].sort((a, b) => a - b);
+  const segments = stops.slice(1).map((end, index) => {
+    const start = stops[index];
+    const cells = rows.slice(start, end);
+    const top = cells[0].top;
+    const bottom = cells.at(-1).bottom;
+    const textCount = cells.filter(({ isText }) => isText).length;
+    const colorCount = cells.length - textCount;
+    return { start, end, cells, top, bottom, textCount, colorCount };
+  });
+  const texts = rows.filter(({ isText }) => isText);
+  const limits = segments.filter(({ textCount }) => textCount).map((segment) =>
+    (segment.bottom - segment.top - segment.colorCount * minCellHeight) / segment.textCount);
+  const fixed = segments.filter(({ textCount, colorCount }) => textCount && !colorCount)
+    .map(({ top, bottom, textCount }) => (bottom - top) / textCount);
+  return {
+    rows, segments, texts,
+    max: Math.max(minCellHeight, Math.min(1, ...limits)),
+    fixed: fixed[0],
+    compatible: fixed.every((height) => Math.abs(height - fixed[0]) < 1e-8),
+  };
+}
+
+function fillColorGap(cells, first, last, top, bottom, output) {
+  if (first >= last) return;
+  const count = last - first;
+  const room = Math.max(0, bottom - top - count * minCellHeight);
+  const weights = cells.slice(first, last).map((cell) => Math.max(0, cell.bottom - cell.top - minCellHeight));
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  let cursor = top;
+  for (let row = first; row < last; row++) {
+    cursor += minCellHeight + room * (total > 1e-12 ? weights[row - first] / total : 1 / count);
+    output[row] = { ...output[row], bottom: row === last - 1 ? bottom : cursor };
+  }
+}
+
+function fitTextColumn(column, profile, height, anchors = new Map()) {
+  if (!profile.compatible || (profile.fixed !== undefined && Math.abs(profile.fixed - height) > 1e-8)) return column;
+  const output = [...column.cells];
+  for (const segment of profile.segments) {
+    if (!segment.textCount) continue;
+    const runs = [];
+    for (let row = segment.start; row < segment.end; row++) {
+      if (!profile.rows[row].isText) continue;
+      const start = row;
+      while (row + 1 < segment.end && profile.rows[row + 1].isText) row++;
+      const end = row + 1;
+      const top = profile.rows[start].top;
+      const bottom = profile.rows[end - 1].bottom;
+      runs.push({ start, end, count: end - start, desired: (top + bottom - (end - start) * height) / 2 });
+    }
+    let used = 0;
+    const lower = runs.map((run) => {
+      const value = segment.top + used * height + (run.start - segment.start - used) * minCellHeight;
+      used += run.count;
+      return value;
+    });
+    used = 0;
+    const upper = runs.map((run) => {
+      const remaining = segment.textCount - used;
+      const value = segment.bottom - remaining * height
+        - (segment.end - run.start - remaining) * minCellHeight;
+      used += run.count;
+      return value;
+    });
+    // A run at an artboard/merge edge has no color gap to absorb movement.
+    if (runs[0].start === segment.start) upper[0] = lower[0] = segment.top;
+    if (runs.at(-1).end === segment.end) upper[runs.length - 1] = lower[runs.length - 1]
+      = segment.bottom - runs.at(-1).count * height;
+    for (let index = 0; index < runs.length; index++) {
+      const run = runs[index];
+      let anchoredTop;
+      for (let row = run.start; row < run.end; row++) {
+        const cell = profile.rows[row];
+        const value = anchors.get(cell.join ?? cell.id);
+        if (value === undefined) continue;
+        const top = value - (row - run.start) * height;
+        if (anchoredTop !== undefined && Math.abs(top - anchoredTop) > 1e-8) return column;
+        anchoredTop = top;
+      }
+      if (anchoredTop === undefined) continue;
+      if (anchoredTop < lower[index] - 1e-8 || anchoredTop > upper[index] + 1e-8) return column;
+      lower[index] = upper[index] = anchoredTop;
+    }
+    for (let index = 1; index < runs.length; index++) lower[index] = Math.max(lower[index], lower[index - 1]
+      + runs[index - 1].count * height + (runs[index].start - runs[index - 1].end) * minCellHeight);
+    for (let index = runs.length - 2; index >= 0; index--) upper[index] = Math.min(upper[index], upper[index + 1]
+      - runs[index].count * height - (runs[index + 1].start - runs[index].end) * minCellHeight);
+    if (lower.some((value, index) => value > upper[index] + 1e-8)) return column;
+    const positions = runs.map((run, index) => clamp(run.desired, lower[index], upper[index]));
+    for (let index = 1; index < runs.length; index++) positions[index] = Math.max(positions[index], positions[index - 1]
+      + runs[index - 1].count * height + (runs[index].start - runs[index - 1].end) * minCellHeight);
+    for (let index = runs.length - 2; index >= 0; index--) positions[index] = Math.min(positions[index], positions[index + 1]
+      - runs[index].count * height - (runs[index + 1].start - runs[index].end) * minCellHeight);
+    let row = segment.start;
+    let cursor = segment.top;
+    runs.forEach((run, index) => {
+      fillColorGap(profile.rows, row, run.start, cursor, positions[index], output);
+      for (let textRow = run.start; textRow < run.end; textRow++) {
+        output[textRow] = { ...output[textRow], bottom: positions[index] + (textRow - run.start + 1) * height };
+      }
+      row = run.end;
+      cursor = positions[index] + run.count * height;
+    });
+    fillColorGap(profile.rows, row, segment.end, cursor, segment.bottom, output);
+    output[segment.end - 1] = { ...output[segment.end - 1], bottom: segment.bottom };
+  }
+  if (output.every((cell, row) => Math.abs(cell.bottom - column.cells[row].bottom) < 1e-10)) return column;
+  return { ...column, cells: output };
+}
+
+function textHeightGroups(geometry) {
+  const parents = geometry.map((_, index) => index);
+  const root = (index) => parents[index] === index ? index : (parents[index] = root(parents[index]));
+  const joins = new Map();
+  geometry.forEach((rows, column) => rows.forEach((cell) => {
+    if (!cell.isText || !cell.merged) return;
+    const id = cell.join ?? cell.id;
+    if (joins.has(id)) parents[root(column)] = root(joins.get(id));
+    else joins.set(id, column);
+  }));
+  const groups = new Map();
+  geometry.forEach((rows, column) => {
+    if (!rows.some(({ isText }) => isText)) return;
+    const key = root(column);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(column);
+  });
+  return [...groups.values()];
+}
+
+function textHeightContext(state) {
+  const geometry = textGeometry(state);
+  return { geometry, profiles: geometry.map(textColumnProfile), groups: textHeightGroups(geometry) };
+}
+
+function solveTextAnchors(context, group, height, selected) {
+  const ids = new Map();
+  const desired = [];
+  for (const column of group) for (const cell of context.geometry[column]) {
+    if (!cell.isText || (!cell.merged && cell.id !== selected?.id)) continue;
+    const id = cell.join ?? cell.id;
+    if (!ids.has(id)) {
+      ids.set(id, ids.size + 1);
+      desired.push([id, (cell.top + cell.bottom - height) / 2]);
+    }
+  }
+  const count = ids.size + 1;
+  const distance = Array.from({ length: count }, (_, index) => Array.from({ length: count }, (__, other) => index === other ? 0 : Infinity));
+  const slope = Array.from({ length: count }, () => Array(count).fill(0));
+  const edge = (first, second, value, derivative) => {
+    if (value >= distance[first][second]) return;
+    distance[first][second] = value;
+    slope[first][second] = derivative;
+  };
+  const bound = (first, second, min, max, minSlope = 0, maxSlope = 0) => {
+    edge(first, second, max, maxSlope);
+    edge(second, first, -min, -minSlope);
+  };
+  for (const column of group) for (const segment of context.profiles[column].segments) {
+    const texts = segment.cells.filter(({ isText }) => isText);
+    const anchors = texts.map((cell, ordinal) => ({ cell, ordinal, node: ids.get(cell.join ?? cell.id) })).filter(({ node }) => node);
+    for (const { cell, ordinal, node } of anchors) {
+      const colorsBefore = cell.row - segment.start - ordinal;
+      const colorsAfter = segment.end - cell.row - (texts.length - ordinal);
+      const min = segment.top + ordinal * height + colorsBefore * minCellHeight;
+      const max = segment.bottom - (texts.length - ordinal) * height - colorsAfter * minCellHeight;
+      bound(0, node, colorsAfter ? min : max, colorsBefore ? max : min,
+        colorsAfter ? ordinal : -(texts.length - ordinal), colorsBefore ? -(texts.length - ordinal) : ordinal);
+    }
+    for (let index = 1; index < anchors.length; index++) {
+      const before = anchors[index - 1];
+      const after = anchors[index];
+      const textCount = after.ordinal - before.ordinal;
+      const colors = after.cell.row - before.cell.row - textCount;
+      const min = textCount * height + colors * minCellHeight;
+      bound(before.node, after.node, min, colors ? Infinity : min, textCount, colors ? 0 : textCount);
+    }
+  }
+  if (selected) {
+    const cell = context.geometry.flat().find((item) => item.id === selected.id);
+    const value = selected.edge === 'top' ? cell.bottom - height : cell.top;
+    const derivative = selected.edge === 'top' ? -1 : 0;
+    bound(0, ids.get(selected.id), value, value, derivative, derivative);
+  }
+  for (let middle = 0; middle < count; middle++) for (let first = 0; first < count; first++) {
+    if (!Number.isFinite(distance[first][middle])) continue;
+    for (let second = 0; second < count; second++) {
+      const value = distance[first][middle] + distance[middle][second];
+      if (value < distance[first][second]) {
+        distance[first][second] = value;
+        slope[first][second] = slope[first][middle] + slope[middle][second];
+      }
+    }
+  }
+  const infeasible = distance.map((row, index) => ({ value: row[index], derivative: slope[index][index] }))
+    .filter(({ value }) => value < -1e-12);
+  if (infeasible.length) {
+    let min = -Infinity;
+    let max = Infinity;
+    for (const { value, derivative } of infeasible) {
+      if (Math.abs(derivative) < 1e-12) return { infeasible: true, min: 1, max: 0 };
+      const limit = height - value / derivative;
+      if (derivative > 0) min = Math.max(min, limit);
+      else max = Math.min(max, limit);
+    }
+    return { infeasible: true, min, max };
+  }
+  const addEdge = (first, second, value) => {
+    if (value >= distance[first][second]) return;
+    for (let from = 0; from < count; from++) for (let to = 0; to < count; to++) {
+      distance[from][to] = Math.min(distance[from][to], distance[from][first] + value + distance[second][to]);
+    }
+  };
+  const positions = new Map();
+  for (const [id, preferred] of desired) {
+    const node = ids.get(id);
+    const value = clamp(preferred, -distance[node][0], distance[0][node]);
+    positions.set(id, value);
+    addEdge(0, node, value);
+    addEdge(node, 0, -value);
+  }
+  return positions;
+}
+
+function groupHeightLimits(context, group) {
+  const profiles = group.map((column) => context.profiles[column]);
+  const fixed = profiles.map(({ fixed }) => fixed).filter((value) => value !== undefined);
+  const max = Math.min(...profiles.map((profile) => profile.max));
+  const compatible = profiles.every((profile) => profile.compatible)
+    && fixed.every((height) => Math.abs(height - fixed[0]) < 1e-8);
+  return { min: fixed[0] ?? minCellHeight, max: fixed[0] ?? max, compatible: compatible && (fixed[0] ?? minCellHeight) <= max + 1e-8 };
+}
+
+function textHeightSolution(context, group, requested, selected) {
+  const limits = groupHeightLimits(context, group);
+  if (!limits.compatible) return null;
+  let min = limits.min;
+  let max = limits.max;
+  let height;
+  let anchors;
+  for (let attempt = 0; attempt < 48; attempt++) {
+    height = clamp(requested, min, max);
+    anchors = solveTextAnchors(context, group, height, selected);
+    if (!anchors.infeasible) break;
+    min = Math.max(min, anchors.min);
+    max = Math.min(max, anchors.max);
+    if (min > max + 1e-10) return null;
+    if (min > max) min = max = (min + max) / 2;
+  }
+  return anchors.infeasible ? null : { height, anchors };
+}
+
+function fitTextGroup(state, context, group, requested, selected) {
+  const solution = textHeightSolution(context, group, requested, selected);
+  if (!solution) return state;
+  const { height, anchors } = solution;
+  const columns = [...state.columns];
+  for (const column of group) columns[column] = fitTextColumn(columns[column], context.profiles[column], height, anchors);
+  return columns.every((column, index) => column === state.columns[index]) ? state : { ...state, columns };
+}
+
+// Merged text connects its columns into one height group; color gaps absorb the difference.
+export function normalizeTextBlockHeights(state, { random } = {}) {
+  const context = textHeightContext(state);
+  let next = state;
+  for (const group of context.groups) {
+    const texts = group.flatMap((column) => context.profiles[column].texts);
+    const average = texts.reduce((sum, cell) => sum + cell.bottom - cell.top, 0) / texts.length;
+    const requested = random ? groupHeightLimits(context, group).max * (.35 + .6 * random()) : average;
+    next = fitTextGroup(next, context, group, requested);
+  }
+  return next;
+}
+
+export function textBlockBoundaryRange(state, id, edge) {
+  if (edge !== 'top' && edge !== 'bottom') return null;
+  const context = textHeightContext(state);
+  const column = context.geometry.findIndex((rows) => rows.some((cell) => cell.id === id));
+  if (column < 0) return null;
+  const cell = context.geometry[column].find((item) => item.id === id);
+  if (!cell.isText) return null;
+  const group = context.groups.find((columns) => columns.includes(column));
+  const limits = groupHeightLimits(context, group);
+  if (!limits.compatible) return null;
+  const selected = { id, edge };
+  const low = textHeightSolution(context, group, limits.min, selected);
+  const high = textHeightSolution(context, group, limits.max, selected);
+  if (!low || !high) return null;
+  const opposite = edge === 'top' ? cell.bottom : cell.top;
+  return edge === 'top' ? { min: opposite - high.height, max: opposite - low.height }
+    : { min: opposite + low.height, max: opposite + high.height };
+}
+
+// The selected block holds its opposite edge. Other text runs grow around their centers;
+// runs touching the top or bottom stay attached to that edge and grow in one direction.
+export function resizeTextBlock(state, id, edge, position) {
+  if (!Number.isFinite(position) || (edge !== 'top' && edge !== 'bottom')) return state;
+  const context = textHeightContext(state);
+  const column = context.geometry.findIndex((rows) => rows.some((cell) => cell.id === id));
+  if (column < 0) return state;
+  const cell = context.geometry[column].find((item) => item.id === id);
+  if (!cell.isText) return state;
+  const requested = edge === 'top' ? cell.bottom - position : position - cell.top;
+  const group = context.groups.find((columns) => columns.includes(column));
+  return fitTextGroup(state, context, group, requested, { id, edge });
+}
+
+function verticalMoveProfile(state, id) {
+  const geometry = textGeometry(state);
+  const location = geometry.flatMap((rows, column) => rows.map((cell) => ({ ...cell, column })));
+  const selected = location.find((cell) => cell.id === id);
+  if (!selected) return null;
+  const members = new Map();
+  for (const cell of location) {
+    const key = cell.join ?? cell.id;
+    if (!members.has(key)) members.set(key, []);
+    members.get(key).push(cell);
+  }
+  const ranges = new Map();
+  const pending = [selected];
+  while (pending.length) {
+    const cell = pending.pop();
+    const previous = ranges.get(cell.column);
+    if (previous && cell.row >= previous.start && cell.row < previous.end) continue;
+    let start = Math.min(cell.row, previous?.start ?? cell.row);
+    let end = Math.max(cell.row + 1, previous?.end ?? cell.row + 1);
+    const rows = geometry[cell.column];
+    if (selected.isText) {
+      while (start && rows[start - 1].isText) start--;
+      while (end < rows.length && rows[end].isText) end++;
+    }
+    ranges.set(cell.column, { start, end });
+    for (let row = start; row < end; row++) {
+      for (const member of members.get(rows[row].join ?? rows[row].id)) {
+        if (member.column !== cell.column) pending.push(member);
+      }
+    }
+  }
+  let min = -1;
+  let max = 1;
+  const intervals = [...ranges].map(([column, range]) => {
+    const rows = geometry[column];
+    let before = range.start;
+    let after = range.end;
+    while (before && !rows[before - 1].isText && !rows[before - 1].merged) before--;
+    while (after < rows.length && !rows[after].isText && !rows[after].merged) after++;
+    const top = rows[range.start].top;
+    const bottom = rows[range.end - 1].bottom;
+    const availableAbove = top - (rows[before]?.top ?? 0) - (range.start - before) * minCellHeight;
+    const availableBelow = (rows[after - 1]?.bottom ?? bottom) - bottom - (after - range.end) * minCellHeight;
+    const movable = before < range.start && after > range.end;
+    min = Math.max(min, movable ? -Math.max(0, availableAbove) : 0);
+    max = Math.min(max, movable ? Math.max(0, availableBelow) : 0);
+    return { column, ...range, before, after, top, bottom, rows };
+  });
+  return { min, max, intervals };
+}
+
+export function blockVerticalRange(state, id) {
+  const profile = verticalMoveProfile(state, id);
+  return profile ? { min: profile.min, max: profile.max } : { min: 0, max: 0 };
+}
+
+export function canMoveBlockVertically(state, id) {
+  const { min, max } = blockVerticalRange(state, id);
+  return max - min > 1e-8;
+}
+
+// Translate text runs without stretching any letter, taking space from color gaps.
+export function moveBlockVertically(state, id, delta) {
+  if (!Number.isFinite(delta)) return state;
+  const profile = verticalMoveProfile(state, id);
+  if (!profile) return state;
+  const movement = clamp(delta, profile.min, profile.max);
+  if (Math.abs(movement) < 1e-10) return state;
+  const columns = [...state.columns];
+  for (const interval of profile.intervals) {
+    const { column, start, end, before, after, top, bottom, rows } = interval;
+    const cells = [...columns[column].cells];
+    fillColorGap(rows, before, start, rows[before].top, top + movement, cells);
+    for (let row = start; row < end; row++) cells[row] = { ...cells[row], bottom: rows[row].bottom + movement };
+    fillColorGap(rows, end, after, bottom + movement, rows[after - 1].bottom, cells);
+    columns[column] = { ...columns[column], cells };
+  }
+  return { ...state, columns };
+}
+
 function varyColumnCount(state, random) {
   const count = state.columns.length;
   const canAdd = count < maxColumns;
@@ -609,8 +1011,9 @@ function shuffleLayoutColors(state, random) {
   });
 }
 
-export function randomizeLayout(state, random = Math.random, { keepColumns = true, shuffleColors = false } = {}) {
-  const grid = keepColumns ? state : varyColumnCount(state, random);
+export function randomizeLayout(state, random = Math.random, { keepColumns = true, shuffleColors = false, linkTextHeights = true } = {}) {
+  const changedGrid = keepColumns ? state : varyColumnCount(state, random);
+  const grid = linkTextHeights ? normalizeTextBlockHeights(changedGrid) : changedGrid;
   const weights = grid.columns.map(() => .7 + random() * 1.4);
   const total = weights.reduce((sum, weight) => sum + weight, 0);
   const free = 1 - grid.columns.length * minColumnWidth;
@@ -627,6 +1030,16 @@ export function randomizeLayout(state, random = Math.random, { keepColumns = tru
       if (max - min > 1e-8) next = replaceBoundaries(next, edges, min + (max - min) * (.18 + .64 * random()));
     }
   });
+  if (linkTextHeights) {
+    next = normalizeTextBlockHeights(next, { random });
+    const consistent = textGeometry(next).every((rows) => {
+      const heights = rows.filter(({ isText }) => isText).map(({ top, bottom }) => bottom - top);
+      return !heights.length || Math.max(...heights) - Math.min(...heights) < 1e-8;
+    });
+    // A merged color barrier can leave no room for a new shared text height.
+    // Retain the valid row arrangement in that case, while still shuffling column widths.
+    if (!consistent) next = { ...next, columns: next.columns.map((column, index) => ({ ...column, cells: grid.columns[index].cells })) };
+  }
   return shuffleColors ? shuffleLayoutColors(next, random) : next;
 }
 
