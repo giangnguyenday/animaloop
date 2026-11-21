@@ -1,12 +1,16 @@
 import { loadRig, SVG_NS } from './rig.js';
 import { cycles, cycleLabels, poses, poseLabels, walkAt, walkDirectionLabels } from './motion.js';
 import { readFrame } from './opla-frame.js';
-import { applyRenderFilter, blendModes, copyCount, effectCopy, effectLabels, effectOptions, effectParameters, renderFilters } from './effects.js';
+import {
+  applyRenderFilter, blendModes, copyCount, effectCopy, effectLabels, effectOptions, effectParameters, renderFilters,
+  effectHasCopies, effectMixColorsEnabled, effectCopyPalette, mixedEffectCopyColor,
+} from './effects.js?v=mixed-copies';
 import { createPhysics } from './physics.js';
 import { createCamera } from './camera.js';
 import { download, svgToPng } from './image-export.js';
 import { bindActionMenus, bindProjectFiles } from './project-menu.js';
 import { loadPalette } from './palette.js';
+import { bindOplaRecording } from './opla-recording.js?v=mixed-copies';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -27,8 +31,8 @@ const defaults = {
   size: dimensions[0], background: '#EAFF74',
   characters: [], walkers: [],
   cycle: 'stroll', speed: 1, travel: true, time: 0,
-  effect: 'none', amount: 4, params: {}, blend: 'normal', filter: 'none', filterStrength: 4,
-  direction: 'right', angle: 0, walkMotion: 'one-way', guides: true, gravity: 1, bounce: .55, pile: false, puppet: false, dropCopies: false,
+  effect: 'none', amount: 4, params: {}, effectMixColors: {}, blend: 'normal', filter: 'none', filterStrength: 4,
+  direction: 'right', angle: 0, walkMotion: 'one-way', guides: true, gravity: 1, bounce: .55, pile: false, puppet: false,
   transparent: false, snap: false, gridSize: 16, cameraZoom: true, cameraSensitivity: 1, cameraComposition: 'mirror', cameraColor: ink,
 };
 
@@ -56,6 +60,8 @@ let showSelection = false;
 let drag;
 let persistTimer;
 let statusTimer;
+let recording;
+let playingBeforePreview = false;
 
 function validSize(value) {
   return typeof value === 'string' && /^\d{3,4}x\d{3,4}$/.test(value)
@@ -97,10 +103,11 @@ function readProject(data) {
     angle: number(data.angle, 0, -180, 180),
     walkMotion: data.walkMotion === 'oscillate' ? 'oscillate' : 'one-way',
     params: Object.fromEntries(Object.keys(effectParameters).map((effect) => [effect, effectOptions(effect, data.params?.[effect])])),
+    effectMixColors: Object.fromEntries(Object.entries(data.effectMixColors ?? {}).filter(([effect, value]) => effectHasCopies(effect) && typeof value === 'boolean')),
     blend: blendModes.includes(data.blend) ? data.blend : 'normal',
     filter: renderFilters.includes(data.filter) ? data.filter : 'none',
     filterStrength: number(data.filterStrength, 4, 1, 20),
-    pile: data.pile === true, puppet: data.puppet === true, dropCopies: data.dropCopies === true,
+    pile: data.pile === true, puppet: data.puppet === true,
     transparent: data.transparent === true, snap: data.snap === true,
     gridSize: Math.round(number(data.gridSize, 16, 4, 128)),
     cameraZoom: data.cameraZoom !== false, cameraSensitivity: number(data.cameraSensitivity, 1, .25, 2),
@@ -146,15 +153,18 @@ function size() {
 
 function updateCanvas() {
   const [width, height] = size();
+  const preview = recording?.currentFrame;
+  const displayWidth = preview?.width ?? width;
+  const displayHeight = preview?.height ?? height;
   stage.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  stageWrap.style.setProperty('--stage-ratio', `${width} / ${height}`);
-  stageWrap.style.setProperty('--stage-aspect', width / height);
+  stageWrap.style.setProperty('--stage-ratio', `${displayWidth} / ${displayHeight}`);
+  stageWrap.style.setProperty('--stage-aspect', displayWidth / displayHeight);
   stageWrap.style.setProperty('--view-zoom', zoom);
   $('zoom-value').textContent = `${Math.round(zoom * 100)}%`;
-  $('canvas-dimensions').textContent = `${width} × ${height}`;
+  $('canvas-dimensions').textContent = `${displayWidth} × ${displayHeight}`;
   $('viewport').dataset.guides = state.guides;
   $('viewport').style.setProperty('--workspace-grid-size', `${state.gridSize}px`);
-  stageWrap.dataset.transparent = state.transparent;
+  stageWrap.dataset.transparent = !!preview || state.transparent;
   stage.querySelector('[data-background]').setAttribute('fill', state.transparent ? 'none' : state.background);
   renderSelection();
 }
@@ -225,6 +235,8 @@ function renderScene() {
   const base = Math.min(width, height) / 1080 * .99;
   const frame = Math.floor(state.time * fps) / fps;
   const params = effectOptions(state.effect, state.params[state.effect]);
+  const mixColors = tab === 'effect' && effectMixColorsEnabled(state.effect, state.effectMixColors);
+  const copyPalette = effectCopyPalette(palette, state.background);
   const tracked = tab === 'camera' ? cameraPose : null;
   const gain = state.cameraSensitivity;
   const cameraScale = tracked && state.cameraZoom ? clamp(1 + ((tracked.scale ?? 1) - 1) * gain, .45, 2.2) : 1;
@@ -246,7 +258,9 @@ function renderScene() {
       const pose = { ...(trackedPose ?? movement.pose) };
       for (const [key, value] of Object.entries(state.puppet ? body?.puppetPose ?? {} : {})) pose[key] = (pose[key] ?? 0) + value;
       entry.update({
-        color: copy.color ?? character.color, scale: scale * (copy.scale ?? 1) * cameraScale,
+        color: copy.color ?? (mixColors && character.color.toUpperCase() === state.background.toUpperCase()
+          ? mixedEffectCopyColor(copyPalette, 1, index, character.color, state.background) : character.color),
+        scale: scale * (copy.scale ?? 1) * cameraScale,
         opacity: copy.opacity ?? 1, rotation: (body?.angle ?? 0) + (movement.rotation ?? 0) + (copy.rotation ?? 0),
         flip: Boolean(movement.flip) !== Boolean(copy.flip),
         x: (body?.x ?? x) + movement.x + (copy.dx ?? 0) + cameraMovement.x,
@@ -256,9 +270,12 @@ function renderScene() {
     }
 
     const count = trails.length;
-    const copyAt = (i) => effectCopy(effect, {
-      i, count, time, frame, base, width, height, x, y, scale, index, cycleSpeed: cycles[state.cycle].travel * (character.walkSpeed ?? 1), travel: state.travel,
-    }, params, palette);
+    const copyAt = (i) => ({
+      ...effectCopy(effect, {
+        i, count, time, frame, base, width, height, x, y, scale, index, cycleSpeed: cycles[state.cycle].travel * (character.walkSpeed ?? 1), travel: state.travel,
+      }, params, copyPalette),
+      color: mixColors ? mixedEffectCopyColor(copyPalette, i || count + 1, index, character.color, state.background) : undefined,
+    });
     for (const [trailIndex, entry] of trails.entries()) {
       const i = count - trailIndex;
       if (effect === 'solitaire') {
@@ -481,6 +498,8 @@ function refreshInspector() {
   $('effect-amount').value = state.amount;
   $('effect-amount').disabled = ['none', 'outline', 'mirror'].includes(state.effect);
   $('effect-amount-value').textContent = state.amount;
+  $('effect-mix-colors-field').hidden = !effectHasCopies(state.effect);
+  $('effect-mix-colors').checked = effectMixColorsEnabled(state.effect, state.effectMixColors);
   $('walk-direction').value = state.direction;
   $('walk-motion').value = state.walkMotion;
   $('walk-angle').value = state.angle;
@@ -494,7 +513,6 @@ function refreshInspector() {
   $('effect-filter-strength-value').textContent = state.filterStrength;
   $('physics-pile').checked = state.pile;
   $('physics-puppet').checked = state.puppet;
-  $('physics-drop-copies').checked = state.dropCopies;
   $('camera-composition').value = state.cameraComposition;
   $('camera-color-field').hidden = state.cameraComposition === 'scene';
   paletteControls('camera-palette', state.cameraColor, 'Camera Opla color', (color, refresh) => {
@@ -528,6 +546,7 @@ function refreshInspector() {
 
 let captured = null;
 function changed(refresh = true, keepUndo = false) {
+  recording?.leavePreview(false);
   captured = null;
   updateCanvas();
   rebuildScene();
@@ -609,8 +628,8 @@ function removeSelected() {
 
 const resetFields = {
   walk: ['cycle', 'speed', 'travel', 'time', 'direction', 'angle', 'walkMotion'],
-  effect: ['effect', 'amount', 'params', 'blend', 'filter', 'filterStrength'],
-  physics: ['gravity', 'bounce', 'pile', 'puppet', 'dropCopies'],
+  effect: ['effect', 'amount', 'params', 'effectMixColors', 'blend', 'filter', 'filterStrength'],
+  physics: ['gravity', 'bounce', 'pile', 'puppet'],
   camera: ['cameraZoom', 'cameraSensitivity', 'cameraComposition', 'cameraColor'],
   settings: ['size', 'background', 'guides', 'transparent', 'snap', 'gridSize'],
 };
@@ -666,6 +685,7 @@ function addCharacter(walking) {
 
 function setTab(next) {
   if (next === tab) return;
+  recording?.leavePreview(false);
   if (tab === 'camera') {
     camera.stop();
     cameraFrameErased = false;
@@ -748,28 +768,13 @@ function artBounds(body, id) {
   return bounds;
 }
 
-function addPhysicsCopy(point) {
-  if (state.characters.length >= 48) return;
-  const [width, height] = size();
-  const source = selected() ?? initialCharacter;
-  rememberScene();
-  const character = { ...source, id: nextCharacterId(), x: clamp(point.x / width, 0, 1), y: clamp(point.y / height, 0, 1) };
-  state.characters.push(character);
-  state.selected = character.id;
-  physics.add(character.id, point, character.scale * Math.min(width, height) / 1080 * .99);
-  changed(true, true);
-  return character;
-}
-
 stage.addEventListener('pointerdown', (event) => {
   if (!['place', 'physics'].includes(tab) || event.button !== 0 || drag) return;
   const scaling = tab === 'place' && event.target.hasAttribute('data-scale-handle');
   const rotating = tab === 'place' && event.target.hasAttribute('data-rotation-handle');
   const target = event.target.closest('[data-character]');
   const origin = stagePoint(event);
-  const hit = scaling || rotating ? selected() : state.characters.find(({ id }) => id === Number(target?.dataset.character));
-  const added = !hit && tab === 'physics' && state.dropCopies ? addPhysicsCopy(origin) : undefined;
-  const character = hit ?? added;
+  const character = scaling || rotating ? selected() : state.characters.find(({ id }) => id === Number(target?.dataset.character));
   if (!character) {
     if (tab === 'place') { showSelection = false; renderSelection(); }
     return;
@@ -784,7 +789,7 @@ stage.addEventListener('pointerdown', (event) => {
   captured = null;
   drag = {
     id: event.pointerId, character, origin, x: character.x, y: character.y,
-    scaling, rotating, added: Boolean(added), scale: character.scale, rotation: character.rotation ?? 0,
+    scaling, rotating, scale: character.scale, rotation: character.rotation ?? 0,
     duplicate: tab === 'place' && !scaling && !rotating && event.altKey,
   };
   stage.setPointerCapture(event.pointerId);
@@ -845,16 +850,9 @@ stage.addEventListener('pointermove', (event) => {
 function endDrag(event) {
   if (event.pointerId !== drag?.id) return;
   if (tab === 'physics') {
-    if (drag.added && event.type === 'pointerup') {
-      const point = stagePoint(event);
-      physics.move(point, event.timeStamp);
-      const [width, height] = size();
-      drag.character.x = clamp(point.x / width, 0, 1);
-      drag.character.y = clamp(point.y / height, 0, 1);
-    }
-    physics.release(event.timeStamp ?? performance.now(), event.type === 'pointerup' && !drag.added);
+    physics.release(event.timeStamp ?? performance.now(), event.type === 'pointerup');
   }
-  const keepUndo = tab === 'place' || drag.added;
+  const keepUndo = tab === 'place';
   drag = null;
   delete stage.dataset.dragging;
   if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
@@ -864,8 +862,8 @@ stage.addEventListener('pointerup', endDrag);
 stage.addEventListener('pointercancel', endDrag);
 stage.addEventListener('lostpointercapture', endDrag);
 
-function snapshot() {
-  renderScene();
+function snapshot({ render = true } = {}) {
+  if (render) renderScene();
   const [width, height] = size();
   const copy = stage.cloneNode(true);
   for (const attribute of ['id', 'class', 'style', 'data-mode', 'data-dragging', 'aria-label', 'role', 'tabindex']) {
@@ -884,7 +882,7 @@ function snapshot() {
 
 async function exportImage(format) {
   if (!rig) return;
-  const frame = captured ?? snapshot();
+  const frame = await recording?.snapshotPreview() ?? captured ?? snapshot();
   try {
     if (format === 'svg') download(frame.svg, 'animaloop-opla.svg');
     else download(await svgToPng(frame.svg, frame.width, frame.height), 'animaloop-opla.png');
@@ -907,7 +905,7 @@ function duplicateCharacter(source, offset = 20) {
 }
 
 function bindShortcuts() {
-  const isEditingField = (event) => event.target.closest('input, textarea, select, [contenteditable]');
+  const isEditingField = (event) => event.target.closest('input, textarea, select, [contenteditable], #opla-timeline, #timeline-toggle');
   const clipboardPrefix = 'ANIMALOOP Opla: ';
   document.addEventListener('copy', (event) => {
     const character = selected();
@@ -1044,7 +1042,7 @@ function bindControls() {
   });
   for (const [id, key] of [
     ['settings-transparent', 'transparent'], ['settings-snap', 'snap'], ['physics-pile', 'pile'],
-    ['physics-puppet', 'puppet'], ['physics-drop-copies', 'dropCopies'], ['camera-auto-zoom', 'cameraZoom'],
+    ['physics-puppet', 'puppet'], ['camera-auto-zoom', 'cameraZoom'],
   ]) {
     $(id).addEventListener('change', (event) => {
       state[key] = event.target.checked;
@@ -1141,12 +1139,14 @@ function bindControls() {
   });
   for (const mode of ['walk', 'effect']) {
     $(`${mode}-play`)?.addEventListener('click', () => {
+      recording?.leavePreview(false);
       playing = !playing;
       if (playing) captured = null;
       else saveLocal();
       updateTransport();
     });
     $(`${mode}-frame`)?.addEventListener('input', (event) => {
+      recording?.leavePreview(false);
       playing = false;
       captured = null;
       const duration = cycles[state.cycle].duration;
@@ -1168,6 +1168,10 @@ function bindControls() {
     $('effect-amount-value').textContent = state.amount;
     changed(false);
   });
+  $('effect-mix-colors').addEventListener('change', (event) => {
+    state.effectMixColors = { ...state.effectMixColors, [state.effect]: event.target.checked };
+    changed();
+  });
   for (const [id, key] of [['effect-blend', 'blend'], ['effect-filter', 'filter']]) {
     $(id).addEventListener('change', (event) => {
       state[key] = event.target.value;
@@ -1179,10 +1183,11 @@ function bindControls() {
     $('effect-filter-strength-value').textContent = state.filterStrength;
     changed(false);
   });
-  $('capture').addEventListener('click', () => {
+  $('capture').addEventListener('click', async () => {
+    recording?.pausePreview();
     playing = false;
     updateTransport();
-    captured = snapshot();
+    captured = await recording?.snapshotPreview() ?? snapshot();
     saveLocal();
     notify('Frame captured. Export as SVG or PNG.');
   });
@@ -1206,6 +1211,8 @@ function bindControls() {
     filename: 'animaloop-project.json',
     getProject: () => ({ ...state, version: 1, mode: tab }),
     openProject(data) {
+      recording?.stopRecording();
+      recording?.leavePreview(false);
       state = readProject(data);
       playing = false;
       customSize = !dimensions.includes(state.size);
@@ -1253,7 +1260,7 @@ async function init() {
     video: $('camera-video'),
     onPose(pose) {
       cameraPose = pose;
-      if (tab === 'camera') renderScene();
+      if (tab === 'camera' && !recording?.previewing) renderScene();
     },
     onStatus(message, status) {
       const inactive = status === 'idle' || status === 'error';
@@ -1278,6 +1285,34 @@ async function init() {
   updateCanvas();
   rebuildScene();
   refreshInspector();
+  recording = bindOplaRecording({
+    captureFrame: () => snapshot({ render: false }),
+    onRecordStart() {
+      if (drag) endDrag({ pointerId: drag.id, type: 'pointerup' });
+      captured = null;
+      if ((tab === 'walk' || tab === 'effect') && canPlay(tab)) playing = true;
+      renderScene();
+      updateTransport();
+    },
+    onPreviewChange(active, clip, { resume = true } = {}) {
+      stageWrap.toggleAttribute('data-timeline-preview', active);
+      if (active) {
+        stageWrap.dataset.timelinePreview = 'true';
+        playingBeforePreview = playing;
+        playing = false;
+        stageWrap.style.setProperty('--stage-ratio', `${clip.width} / ${clip.height}`);
+        stageWrap.style.setProperty('--stage-aspect', clip.width / clip.height);
+        stageWrap.dataset.transparent = 'true';
+        $('canvas-dimensions').textContent = `${clip.width} × ${clip.height}`;
+      } else {
+        playing = resume && playingBeforePreview && (tab === 'walk' || tab === 'effect') && canPlay(tab);
+        updateCanvas();
+        renderScene();
+      }
+      updateTransport();
+    },
+    notify,
+  });
   bindControls();
   historyBaseline = historySnapshot();
   updateHistoryControls();
@@ -1286,16 +1321,17 @@ async function init() {
   function tick(now) {
     const elapsed = Math.min((now - last) / 1000, .1);
     last = now;
-    if (tab === 'physics') {
+    if (!recording.previewing && tab === 'physics') {
       const [width, height] = size();
       const steps = Math.max(1, Math.ceil(elapsed / .012));
       for (let i = 0; i < steps; i++) physics.step(elapsed / steps, width, height, state.gravity, state.bounce, { pile: state.pile, puppet: state.puppet, artBounds });
       renderScene();
-    } else if (playing && canPlay(tab)) {
+    } else if (!recording.previewing && playing && canPlay(tab)) {
       state.time += elapsed * state.speed;
       renderScene();
       updateTransport();
     }
+    recording.tick(now);
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);

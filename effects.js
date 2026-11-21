@@ -37,12 +37,65 @@ export function copyCount(effect, amount, animated) {
   return ['none', 'outline'].includes(effect) ? 0 : amount;
 }
 
+export function effectHasCopies(effect) {
+  return Object.hasOwn(effectLabels, effect) && effect !== 'none' && effect !== 'outline';
+}
+
+export function effectMixColorsEnabled(effect, preferences = {}) {
+  if (!effectHasCopies(effect)) return false;
+  const preference = preferences && typeof preferences === 'object' && !Array.isArray(preferences)
+    && Object.hasOwn(preferences, effect) ? preferences[effect] : undefined;
+  return typeof preference === 'boolean' ? preference : effect === 'prism';
+}
+
+function paletteHex(color) {
+  if (typeof color !== 'string') return undefined;
+  const hex = color.trim().toUpperCase();
+  return /^#[0-9A-F]{6}$/.test(hex) ? hex : undefined;
+}
+
+export function effectCopyPalette(palette, background) {
+  if (!Array.isArray(palette)) return [];
+  const excluded = paletteHex(background);
+  const seen = new Set();
+  return palette.flatMap((entry) => {
+    const hex = paletteHex(typeof entry === 'string' ? entry : entry?.hex);
+    if (!hex || hex === excluded || seen.has(hex)) return [];
+    seen.add(hex);
+    return [{ ...(typeof entry === 'object' ? entry : {}), hex }];
+  });
+}
+
+function contrastingCopyColor(background) {
+  const hex = paletteHex(background) ?? '#FFFFFF';
+  const channels = [1, 3, 5].map((offset) => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+  });
+  const lightness = channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+  return (lightness + .05) / .05 >= 1.05 / (lightness + .05) ? '#000000' : '#FFFFFF';
+}
+
+// Effect copies use one-based indices; offset each character to vary repeated compositions.
+export function mixedEffectCopyColor(palette, copyIndex, characterIndex = 0, fallbackColor, background) {
+  const colors = effectCopyPalette(palette, background);
+  if (colors.length) {
+    const copy = Number.isFinite(copyIndex) ? Math.trunc(copyIndex) - 1 : 0;
+    const character = Number.isFinite(characterIndex) ? Math.trunc(characterIndex) : 0;
+    const start = repeat(character, colors.length);
+    const offset = colors.length > 1 && colors[start].hex === paletteHex(fallbackColor) ? 1 : 0;
+    return colors[repeat(copy + character + offset, colors.length)].hex;
+  }
+  const fallback = paletteHex(fallbackColor);
+  return fallback && fallback !== paletteHex(background) ? fallback : contrastingCopyColor(background);
+}
+
 const repeat = (x, length) => ((x % length) + length) % length;
 const radians = (degrees) => degrees * Math.PI / 180;
 const noise = (seed) => repeat(Math.sin(seed * 127.1) * 43758.5453, 1);
 const vector = (angle, distance) => ({ dx: Math.cos(radians(angle)) * distance, dy: Math.sin(radians(angle)) * distance });
 
-export function effectCopy(effect, { i, count, time, frame, base, width, height, x, y, scale, index, cycleSpeed, travel }, p, palette = []) {
+export function effectCopy(effect, { i, count, time, frame, base, width, height, x, y, scale, index, cycleSpeed, travel, color, background }, p, palette = []) {
   const fade = (count + 1 - i) / (count + 1);
   switch (effect) {
     case 'onion':
@@ -89,7 +142,7 @@ export function effectCopy(effect, { i, count, time, frame, base, width, height,
     case 'prism':
       return {
         ...vector(p.angle + (i % 2 ? 0 : 180), Math.ceil(i / 2) * p.spacing * base),
-        color: palette[(i - 1) % palette.length]?.hex,
+        color: mixedEffectCopyColor(palette, i, index, color, background),
         opacity: p.opacity / 100,
       };
     case 'crowd': {

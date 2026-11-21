@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Build, animate, and capture Opla festival key visuals.">
   <title>ANIMALOOP — Fry Your Opla</title>
-  <link rel="stylesheet" href="./styles.css?v=project-menu">
+  <link rel="stylesheet" href="./styles.css?v=timeline-tools">
+  <link rel="stylesheet" href="./opla-recording.css?v=timeline-tools-final">
 </head>
-<body>
+<body data-timeline-open="true">
   <header class="topbar">
     <a class="brand" href="./opla.html" aria-label="Animaloop Studio">
-      <img src="./src/logo.svg?v=animaloop" alt="" width="120" height="63">
+      <img src="./src/logo.svg?v=timeline-tools" alt="" width="120" height="63">
     </a>
     <h1 id="studio-title" class="header-caption mono">FRY YOUR OPLA</h1>
     <div class="header-actions">
@@ -32,8 +33,14 @@
       <details class="action-menu">
         <summary class="button primary">Export <svg class="action-icon" width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 9 9 3M4.5 3H9v4.5"/></svg></summary>
         <div class="menu-content">
-          <button type="button" id="export-svg">Download SVG</button>
-          <button type="button" id="export-png">Download PNG</button>
+          <div class="menu-section">
+            <button type="button" id="export-svg">Download SVG</button>
+            <button type="button" id="export-png">Download PNG</button>
+          </div>
+          <div class="menu-section">
+            <button type="button" id="export-mov" disabled>Download MOV</button>
+            <button type="button" id="export-gif" disabled>Create GIF loop</button>
+          </div>
         </div>
       </details>
     </div>
@@ -53,6 +60,8 @@
           <div class="stage-space">
             <div id="stage-wrap">
               <svg id="stage" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" role="img" aria-label="Opla key visual"></svg>
+              <img id="timeline-preview" alt="Recorded animation preview" hidden>
+              <div id="timeline-fade-overlay" aria-hidden="true" hidden></div>
             </div>
           </div>
         </div>
@@ -69,8 +78,62 @@
               <svg class="action-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.3 9.8a1 1 0 0 1 0-1.4l5.6-5.6a1 1 0 0 1 1.4 0l3.9 3.9a1 1 0 0 1 0 1.4l-5 5H5.6zM5 5.7l5.3 5.3M8.2 13.1h5.5"/></svg>
             </button>
             <button type="button" class="button primary frame-button" id="capture" aria-label="Capture frame" title="Capture frame"><svg class="action-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true" focusable="false"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="8" cy="8" r="2.75"/></svg></button>
+            <button type="button" class="button frame-button" id="timeline-toggle" aria-label="Toggle timeline" title="Hide timeline" aria-controls="opla-timeline" aria-expanded="true" data-recording="false"><svg class="action-icon"  width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 5h12M2 11h12M6 2v12"/><path d="m4 2 2 2 2-2Z" fill="currentColor" stroke="none"/></svg></button>
           </div>
         </div>
+        <section class="opla-timeline" id="opla-timeline" aria-labelledby="timeline-heading">
+          <p class="visually-hidden" id="timeline-state" role="status" aria-live="polite"></p>
+          <div class="timeline-export-feedback">
+            <progress id="timeline-progress" max="1" value="0" aria-label="Animation export progress" hidden></progress>
+            <span id="timeline-export-status" role="status" aria-live="polite"></span>
+            <button type="button" class="button frame-button" id="timeline-cancel" aria-label="Cancel export" title="Cancel export" hidden><svg class="action-icon"  width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
+          </div>
+          <div class="timeline-controls-row">
+            <h2 id="timeline-heading">Timeline</h2>
+            <span id="timeline-completion" hidden></span>
+            <div class="timeline-transport" role="group" aria-label="Recording controls">
+              <button type="button" class="button frame-button" id="timeline-record" aria-label="Record" title="Record" disabled><svg class="action-icon"  width="14" height="14" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="4.5"/></svg></button>
+              <button type="button" class="button frame-button" id="timeline-stop" aria-label="Stop recording" title="Stop recording" disabled><svg class="action-icon"  width="14" height="14" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.75" y="3.75" width="8.5" height="8.5" rx=".5"/></svg></button>
+              <button type="button" class="button frame-button" id="timeline-play" aria-label="Preview" title="Preview" data-playing="false" disabled><svg class="action-icon" data-timeline-icon="play" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5 2.75 8 5.25-8 5.25Z"/></svg><svg class="action-icon" data-timeline-icon="pause" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="3" width="2.75" height="10" rx=".5"/><rect x="9.25" y="3" width="2.75" height="10" rx=".5"/></svg></button>
+              <button type="button" class="button frame-button" id="timeline-live" aria-label="Back to live" title="Back to live" hidden><svg class="action-icon"  width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 3-4 4 4 4M2 7h7.5a4 4 0 0 1 4 4v2"/></svg></button>
+              <button type="button" class="button frame-button" id="timeline-crop" aria-label="Crop clip" title="Crop clip" aria-pressed="false" disabled><svg class="action-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 1.5v9a1.5 1.5 0 0 0 1.5 1.5h9M1.5 4h9A1.5 1.5 0 0 1 12 5.5v9"/></svg></button>
+              <div class="timeline-tool">
+                <button type="button" class="button frame-button" id="timeline-fade-in" aria-label="Fade in" title="Fade in" aria-expanded="false" aria-controls="timeline-fade-in-panel" disabled><svg class="action-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 12 14 3v9Z"/></svg></button>
+                <div class="timeline-fade-panel" id="timeline-fade-in-panel" role="dialog" aria-label="Fade in" hidden>
+                  <h3>Fade in</h3>
+                  <label class="field">Duration (s)<input type="number" id="timeline-fade-in-duration" min="0" max="15" step=".1" value="0"></label>
+                  <button type="button" class="button wide" id="timeline-fade-in-remove">Remove fade</button>
+                </div>
+              </div>
+              <div class="timeline-tool">
+                <button type="button" class="button frame-button" id="timeline-fade-out" aria-label="Fade out" title="Fade out" aria-expanded="false" aria-controls="timeline-fade-out-panel" disabled><svg class="action-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m2 3 12 9H2Z"/></svg></button>
+                <div class="timeline-fade-panel" id="timeline-fade-out-panel" role="dialog" aria-label="Fade out" hidden>
+                  <h3>Fade out</h3>
+                  <label class="field">Duration (s)<input type="number" id="timeline-fade-out-duration" min="0" max="15" step=".1" value="0"></label>
+                  <button type="button" class="button wide" id="timeline-fade-out-remove">Remove fade</button>
+                </div>
+              </div>
+              <button type="button" class="button frame-button" id="timeline-clear" aria-label="Clear recording" title="Clear recording" disabled><svg class="action-icon"  width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.5 4.5h11M6 2.5h4M4 4.5l.5 9h7l.5-9M6.5 7v4M9.5 7v4"/></svg></button>
+            </div>
+            <label class="timeline-length">Duration
+              <span class="timeline-number-unit"><input type="number" id="record-duration" min="1" max="30" step="1" value="30" aria-label="Recording duration in seconds"><span aria-hidden="true">s</span></span>
+            </label>
+          </div>
+          <div class="timeline-position-row">
+            <label class="timeline-position"><span class="visually-hidden">Timeline position</span>
+              <input type="range" id="timeline-scrub" min="0" max="30" step=".01" value="0" disabled>
+            </label>
+            <div class="timeline-crop-range" id="timeline-crop-range" role="group" aria-label="Clip crop range">
+              <div class="timeline-crop-track" aria-hidden="true"><span class="timeline-crop-selection"></span></div>
+              <input type="range" id="timeline-crop-start" min="0" max="30" step=".01" value="0" aria-label="Clip start">
+              <input type="range" id="timeline-crop-end" min="0" max="30" step=".01" value="30" aria-label="Clip end">
+            </div>
+            <output id="timeline-time" for="timeline-scrub" aria-live="off">00:00.00 / 00:30.00</output>
+            <button type="button" class="button frame-button" id="timeline-crop-apply" aria-label="Apply crop" title="Apply crop" hidden><svg class="action-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m3 8 3 3 7-7"/></svg></button>
+            <button type="button" class="button frame-button" id="timeline-crop-cancel" aria-label="Cancel crop" title="Cancel crop" hidden><svg class="action-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
+          </div>
+
+        </section>
       </div>
       <div class="workspace-footer mono">
         <span>by Behalf</span>
@@ -190,6 +253,7 @@
           <label class="field"><span class="value-row">Amount <output id="effect-amount-value" for="effect-amount">4</output></span>
             <input id="effect-amount" type="range" min="1" max="50" step="1" value="4">
           </label>
+          <label class="checkbox-field" id="effect-mix-colors-field" hidden><input id="effect-mix-colors" type="checkbox"> Mix colors</label>
           <div id="effect-parameters" class="parameter-fields"></div>
           <label class="field">Blend mode
             <select id="effect-blend">
@@ -235,7 +299,6 @@
           </label>
           <label class="checkbox-field"><input id="physics-pile" type="checkbox"> Stack characters on impact</label>
           <label class="checkbox-field"><input id="physics-puppet" type="checkbox"> Swing arms and legs</label>
-          <label class="checkbox-field"><input id="physics-drop-copies" type="checkbox"> Click to add Opla</label>
           <div class="row-actions">
             <button id="physics-reset" type="button" class="button">Reset physics</button>
             <button id="physics-remove" type="button" class="button">Remove selected Opla</button>
@@ -304,6 +367,6 @@
       </section>
     </aside>
   </main>
-  <script type="module" src="./app.js?v=shared-palette"></script>
+  <script type="module" src="./app.js?v=mixed-copies"></script>
 </body>
 </html>
